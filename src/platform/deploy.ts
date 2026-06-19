@@ -1,0 +1,88 @@
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { discoverServices } from "./service-discovery.js";
+
+import type { DeployTarget } from "./terraform.js";
+
+const args = parseArgs(process.argv.slice(2));
+
+if (!args.env) {
+  throw new Error("Missing required --env <env> argument");
+}
+
+if (!args.venture) {
+  throw new Error("Missing required --venture <venture> argument");
+}
+
+const target = args.target ?? "aws";
+
+run("pnpm", ["platform:generate", "--", "--env", args.env, "--venture", args.venture, "--target", target, ...(args.services.length > 0 ? ["--services", args.services.join(",")] : [])], process.cwd());
+
+const services = await discoverServices({ env: args.env, venture: args.venture, services: args.services });
+
+for (const service of services) {
+  const cwd = path.join(process.cwd(), "generated", target, service.metadata.env, service.metadata.venture, service.metadata.serviceName);
+  run("terraform", ["init"], cwd);
+  run("terraform", ["plan", "-out=tfplan"], cwd);
+  run("terraform", ["apply", "tfplan"], cwd);
+}
+
+function parseArgs(argv: string[]): { env?: string; venture?: string; target?: DeployTarget; services: string[] } {
+  const parsed: { env?: string; venture?: string; target?: DeployTarget; services: string[] } = { services: [] };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === "--") {
+      continue;
+    }
+
+    if (arg === "--env") {
+      parsed.env = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--venture") {
+      parsed.venture = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      parsed.target = parseTarget(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--services") {
+      parsed.services = argv[index + 1]
+        .split(",")
+        .map((service) => service.trim())
+        .filter(Boolean);
+      index += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return parsed;
+}
+
+function parseTarget(value: string): DeployTarget {
+  if (value === "aws" || value === "floci") {
+    return value;
+  }
+
+  throw new Error(`Unsupported target: ${value}`);
+}
+
+function run(command: string, args: string[], cwd: string): void {
+  console.log(`Running: ${command} ${args.join(" ")} in ${cwd}`);
+  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
+
+  if (result.status !== 0) {
+    throw new Error(`Command failed: ${command} ${args.join(" ")}`);
+  }
+}

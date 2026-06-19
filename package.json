@@ -1,0 +1,38 @@
+{
+  "name": "learn-terraform-get-started-aws",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "app:payment-api:package": "rm -rf dist/payment-api-package dist/payment-api.zip && mkdir -p dist/payment-api-package && rolldown -c rolldown.payment-api.config.mjs && printf '{\"type\":\"module\"}\n' > dist/payment-api-package/package.json && cd dist/payment-api-package && zip -r ../payment-api.zip index.js package.json",
+    "platform:generate": "tsx --no-cache src/platform/generate.ts",
+    "platform:deploy": "tsx --no-cache src/platform/deploy.ts",
+    "platform:schema:sync": "tsx --no-cache src/platform/sync-schemas.ts",
+    "platform:validate": "tsx --no-cache src/platform/validate.ts",
+    "floci:up": "floci start",
+    "floci:down": "floci stop",
+    "floci:deploy": "pnpm platform:deploy -- --env dev --venture venture --target floci",
+    "floci:deploy:all": "pnpm app:payment-api:package && pnpm platform:deploy -- --env dev --venture venture --target floci --services customer-records,payment-api",
+    "floci:reset:ddb": "./scripts/floci-ddb-reset.sh",
+    "floci:redeploy:ddb": "pnpm floci:reset:ddb && pnpm platform:deploy -- --env dev --venture venture --target floci --services customer-records",
+    "floci:invoke:payment-api": "./scripts/floci-invoke-payment-api.sh",
+    "floci:get:item": "./scripts/floci-ddb-get-item.sh",
+    "floci:list:tables": "./scripts/floci-ddb-list-tables.sh",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1072.0",
+    "ajv": "^8.20.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "esbuild": "^0.28.1",
+    "rolldown": "^1.1.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
+  }
+}
