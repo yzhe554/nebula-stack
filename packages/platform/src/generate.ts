@@ -1,9 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { discoverServices } from "./service-discovery.js";
-import { generatedDirectoryForService } from "./generated-paths.js";
-import { terraformForService, type DeployTarget } from "./terraform.js";
-import { validateServiceReferences } from "./validate.js";
+import { discoverServices } from "./service-discovery";
+import { generatedDirectoryForService } from "./generated-paths";
+import { terraformForService, type DeployTarget } from "./terraform";
+import { validateServiceReferences } from "./validate";
 
 const args = parseArgs(process.argv.slice(2));
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -33,7 +33,7 @@ for (const service of services) {
 function serviceNamesFor(services: Awaited<ReturnType<typeof discoverServices>>): Record<string, string> {
   return Object.fromEntries(
     services
-      .filter((service) => service.metadata.serviceType === "dynamodb")
+      .filter((service) => service.metadata.serviceType === "dynamodb" || service.metadata.serviceType === "lambda")
       .map((service) => [service.metadata.serviceName, physicalName(service.metadata)]),
   );
 }

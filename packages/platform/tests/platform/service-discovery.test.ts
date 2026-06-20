@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import { discoverServices } from "../../src/service-discovery.js";
+import { discoverServices } from "../../src/service-discovery";
 
 describe("discoverServices", () => {
   test("loads selected services for one environment and derives path metadata", async () => {
@@ -66,6 +66,54 @@ describe("discoverServices", () => {
       memoryMb: 128,
       timeoutSeconds: 10,
       logRetentionDays: 7,
+    });
+  });
+
+  test("discovers API Gateway services", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "platform-services-"));
+    const servicesRoot = path.join(root, "services");
+    await mkdir(path.join(servicesRoot, "dev", "venture", "core", "public"), { recursive: true });
+
+    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "public", "docs.apigateway.yaml"), [
+      "description: Docs and API gateway",
+      "routes:",
+      "  - path: /{proxy+}",
+      "    method: ANY",
+      "    target:",
+      "      type: http_proxy",
+      "      uri: http://host.docker.internal:3001/{proxy}",
+    ].join("\n"));
+    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "network.yaml"), [
+      "cidrs:",
+      "  ipv4:",
+      "    vpc: 10.20.0.0/16",
+      "zones:",
+      "  public:",
+      "    description: Public ingress services.",
+      "    subnets:",
+      "      - 10.20.1.0/24",
+      "flows: []",
+      "awsEndpoints: {}",
+    ].join("\n"));
+
+    const services = await discoverServices({ env: "dev", venture: "venture", servicesRoot });
+
+    expect(services).toHaveLength(1);
+    expect(services[0]).toMatchObject({
+      metadata: {
+        serviceName: "docs",
+        serviceType: "apigateway",
+        securityZone: "public",
+      },
+      config: {
+        routes: [
+          {
+            path: "/{proxy+}",
+            method: "ANY",
+            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/{proxy}" },
+          },
+        ],
+      },
     });
   });
 

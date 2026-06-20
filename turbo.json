@@ -7,7 +7,7 @@
     },
     "package": {
       "dependsOn": ["^build"],
-      "outputs": ["../../dist/**"]
+      "outputs": ["dist/**"]
     },
     "test": {
       "dependsOn": ["^build"],

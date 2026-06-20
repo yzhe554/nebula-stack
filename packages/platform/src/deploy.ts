@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { generatedDirectoryForService } from "./generated-paths.js";
-import { discoverServices } from "./service-discovery.js";
+import { generatedDirectoryForService } from "./generated-paths";
+import { discoverServices } from "./service-discovery";
 
-import type { DeployTarget } from "./terraform.js";
+import type { DeployTarget } from "./terraform";
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -23,11 +23,28 @@ run("pnpm", ["platform:generate", "--", "--env", args.env, "--venture", args.ven
 
 const services = await discoverServices({ env: args.env, venture: args.venture, services: args.services, servicesRoot });
 
-for (const service of services) {
+for (const service of [...services].sort(compareDeployOrder)) {
   const cwd = generatedDirectoryForService(service.metadata, target);
   run("terraform", ["init"], cwd);
   run("terraform", ["plan", "-out=tfplan"], cwd);
   run("terraform", ["apply", "tfplan"], cwd);
+}
+
+function compareDeployOrder(left: Awaited<ReturnType<typeof discoverServices>>[number], right: Awaited<ReturnType<typeof discoverServices>>[number]): number {
+  return serviceDeployPriority(left.metadata.serviceType) - serviceDeployPriority(right.metadata.serviceType)
+    || left.metadata.serviceName.localeCompare(right.metadata.serviceName);
+}
+
+function serviceDeployPriority(serviceType: string): number {
+  if (serviceType === "dynamodb") {
+    return 0;
+  }
+
+  if (serviceType === "lambda") {
+    return 1;
+  }
+
+  return 2;
 }
 
 function repoRoot(): string {

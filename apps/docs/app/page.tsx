@@ -12,7 +12,7 @@ const repoAreas = [
     name: "apps/payment-api",
     eyebrow: "Lambda application",
     description: "Owns the sample payment API handler, app-local tests, and packaged Lambda artifact under apps/payment-api/dist.",
-    links: ["index.mjs", "tests/handler.test.mjs", "dist/payment-api.zip"],
+    links: ["index.ts", "tests/handler.test.ts", "dist/payment-api.zip"],
   },
   {
     name: "apps/docs",
@@ -37,13 +37,17 @@ const repoAreas = [
 const commands = [
   ["Set up local cache", "pnpm setup:local"],
   ["Run docs locally", "pnpm docs:dev"],
+  ["Run docs behind Floci", "pnpm docs:dev:floci"],
   ["Reset docs cache", "pnpm docs:reset"],
   ["Run all tests", "pnpm test"],
   ["Typecheck packages", "pnpm typecheck"],
   ["Deploy to Floci", "pnpm floci:deploy:all"],
+  ["Print Floci URLs", "pnpm floci:url"],
   ["Reset Floci state", "pnpm floci:reset:all"],
   ["Reset and redeploy", "pnpm floci:redeploy:all"],
 ];
+
+const apiGatewayUrl = "http://localhost:4566/execute-api/<api-id>/$default/";
 
 export default function Home() {
   return (
@@ -123,9 +127,10 @@ export default function Home() {
               metadata, and write Terraform JSON beside the owning service folder.
             </p>
           </div>
-          <pre><code>{`infra/services/dev/venture/core/internal/
-├── payment-api.lambda.yaml
-└── __generated__/floci/payment-api/main.tf.json`}</code></pre>
+          <pre><code>{`infra/services/dev/venture/core/
+├── internal/payment-api.lambda.yaml
+├── public/docs.apigateway.yaml
+└── managed/customer-records.dynamodb.yaml`}</code></pre>
         </section>
 
         <section id="infra" className="sectionBlock">
@@ -151,6 +156,15 @@ export default function Home() {
                 <code>{command}</code>
               </div>
             ))}
+          </div>
+          <div className="callout">
+            <p className="eyebrow">Floci API Gateway</p>
+            <h2>Local ingress uses Floci path-style URLs</h2>
+            <p>
+              After <code>pnpm floci:deploy:all</code>, get the HTTP API id from Floci and open
+              <code>{apiGatewayUrl}</code>. The root route proxies to this docs app and
+              <code>/api/payments</code> invokes the Lambda route.
+            </p>
           </div>
         </section>
       </article>

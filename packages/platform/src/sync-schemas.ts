@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { platformJsonSchemas } from "./schema-json.js";
+import { platformJsonSchemas } from "./schema-json";
 
 export async function syncJsonSchemas(outputDirectory = "schemas"): Promise<void> {
   await mkdir(outputDirectory, { recursive: true });

@@ -3,10 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { ZodError } from "zod";
-import { loadNetworkPolicy } from "./network-zones.js";
-import { dynamoDbSchema, lambdaSchema } from "./schemas.js";
-import { discoverServices } from "./service-discovery.js";
-import type { LoadedService } from "./types.js";
+import { loadNetworkPolicy } from "./network-zones";
+import { apiGatewaySchema, dynamoDbSchema, lambdaSchema } from "./schemas";
+import { discoverServices } from "./service-discovery";
+import type { LoadedService } from "./types";
 
 export type ValidationError = {
   file: string;
@@ -135,6 +135,11 @@ async function validateYamlFile(filePath: string, servicesRoot: string): Promise
 
   if (fileName.endsWith(".dynamodb.yaml") || fileName.endsWith(".dynamodb.yml")) {
     dynamoDbSchema.parse(raw);
+    return;
+  }
+
+  if (fileName.endsWith(".apigateway.yaml") || fileName.endsWith(".apigateway.yml")) {
+    apiGatewaySchema.parse(raw);
     return;
   }
 

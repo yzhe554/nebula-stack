@@ -1,13 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { createHandler } from "../index.mjs";
+import type { PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { createHandler } from "../index";
 
 describe("payment-api handler", () => {
   test("writes one payment message to DynamoDB", async () => {
-    const sent = [];
+    const sent: unknown[] = [];
     const handler = createHandler({
       tableName: "payments-table",
       dynamoDbClient: {
-        send: async (command) => {
+        send: async (command: PutItemCommand) => {
           sent.push(command.input);
           return {};
         },

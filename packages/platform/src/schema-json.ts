@@ -1,7 +1,8 @@
 import type { z } from "zod";
-import { dynamoDbSchema } from "../schemas/dynamodb.schema.js";
-import { lambdaSchema } from "../schemas/lambda.schema.js";
-import { networkPolicySchema } from "../schemas/network.schema.js";
+import { apiGatewaySchema } from "../schemas/apigateway.schema";
+import { dynamoDbSchema } from "../schemas/dynamodb.schema";
+import { lambdaSchema } from "../schemas/lambda.schema";
+import { networkPolicySchema } from "../schemas/network.schema";
 
 type JsonSchemaMetadata = { id: string; title: string; description: string };
 
@@ -44,8 +45,17 @@ export function networkJsonSchema(): Record<string, unknown> {
   });
 }
 
+export function apiGatewayJsonSchema(): Record<string, unknown> {
+  return generateSchemaObject(apiGatewaySchema, {
+    id: "https://example.local/packages/platform/schemas/apigateway.schema.json",
+    title: "Platform API Gateway Service",
+    description: "YAML schema for AWS API Gateway HTTP APIs deployed by the platform.",
+  });
+}
+
 export const platformJsonSchemas = {
   "lambda.schema.json": lambdaJsonSchema,
   "dynamodb.schema.json": dynamoDbJsonSchema,
   "network.schema.json": networkJsonSchema,
+  "apigateway.schema.json": apiGatewayJsonSchema,
 } as const;

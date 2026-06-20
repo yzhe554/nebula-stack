@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import { validateAllConfigs, validateConfigs } from "../../src/validate.js";
+import { validateAllConfigs, validateConfigs } from "../../src/validate";
 
 describe("validateConfigs", () => {
   test("validates all config files for an env and venture", async () => {
@@ -13,8 +13,8 @@ describe("validateConfigs", () => {
     expect(result.valid).toBe(true);
     expect(result.files).toEqual([
       "services/dev/venture/core/internal/payment-api.lambda.yaml",
+      "services/dev/venture/core/managed/customer-records.dynamodb.yaml",
       "services/dev/venture/core/network.yaml",
-      "services/dev/venture/core/restricted/customer-records.dynamodb.yaml",
     ]);
     expect(result.errors).toEqual([]);
   });
@@ -73,7 +73,7 @@ async function createValidConfigTree(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "platform-validate-"));
   const servicesRoot = path.join(root, "infra", "services", "dev", "venture", "core");
   await mkdir(path.join(servicesRoot, "internal"), { recursive: true });
-  await mkdir(path.join(servicesRoot, "restricted"), { recursive: true });
+  await mkdir(path.join(servicesRoot, "managed"), { recursive: true });
 
   await writeFile(path.join(servicesRoot, "network.yaml"), [
     "cidrs:",
@@ -84,10 +84,6 @@ async function createValidConfigTree(): Promise<string> {
     "    description: Application services that are not public.",
     "    subnets:",
     "      - 10.20.10.0/24",
-    "  restricted:",
-    "    description: Data services and sensitive resources.",
-    "    subnets:",
-    "      - 10.20.20.0/24",
     "flows:",
     "  - from: internal",
     "    to: aws",
@@ -96,7 +92,7 @@ async function createValidConfigTree(): Promise<string> {
     "  dynamodb:",
     "    type: gateway",
     "    serviceName: com.amazonaws.ap-southeast-2.dynamodb",
-    "    routeTableZoneNames: [internal, restricted]",
+    "    routeTableZoneNames: [internal]",
     "    policy: default",
   ].join("\n"));
 
@@ -108,7 +104,7 @@ async function createValidConfigTree(): Promise<string> {
     "timeoutSeconds: 10",
     "logRetentionDays: 7",
     "environment:",
-    "  TABLE_NAME: dev-venture-core-restricted-customer-records",
+    "  TABLE_NAME: dev-venture-core-managed-customer-records",
     "permissions:",
     "  dynamodb:",
     "    - service: customer-records",
@@ -116,7 +112,7 @@ async function createValidConfigTree(): Promise<string> {
     "        - dynamodb:PutItem",
   ].join("\n"));
 
-  await writeFile(path.join(servicesRoot, "restricted", "customer-records.dynamodb.yaml"), [
+  await writeFile(path.join(servicesRoot, "managed", "customer-records.dynamodb.yaml"), [
     "billingMode: PAY_PER_REQUEST",
     "hashKey:",
     "  name: customerId",

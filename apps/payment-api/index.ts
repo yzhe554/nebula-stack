@@ -1,7 +1,31 @@
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 
-export function createHandler({ tableName, dynamoDbClient }) {
-  return async function handler(event) {
+type ApiGatewayEvent = {
+  body?: string | Record<string, unknown> | null;
+};
+
+type ApiGatewayResponse = {
+  statusCode: number;
+  body: string;
+};
+
+type PaymentBody = {
+  customerId?: string;
+  paymentId?: string;
+  message?: string;
+};
+
+type DynamoDbSender = {
+  send(command: PutItemCommand): Promise<unknown>;
+};
+
+type HandlerOptions = {
+  tableName: string;
+  dynamoDbClient: DynamoDbSender;
+};
+
+export function createHandler({ tableName, dynamoDbClient }: HandlerOptions) {
+  return async function handler(event: ApiGatewayEvent): Promise<ApiGatewayResponse> {
     const body = parseBody(event);
     const customerId = body.customerId ?? body.paymentId ?? `customer-${Date.now()}`;
     const message = body.message ?? "created";
@@ -21,11 +45,11 @@ export function createHandler({ tableName, dynamoDbClient }) {
   };
 }
 
-export async function handler(event) {
+export async function handler(event: ApiGatewayEvent): Promise<ApiGatewayResponse> {
   const runtimeHandler = createHandler({
     tableName: requiredEnv("TABLE_NAME"),
     dynamoDbClient: new DynamoDBClient({
-      region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "ap-southeast-2",
+      region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
       endpoint: process.env.AWS_ENDPOINT_URL,
       credentials: process.env.AWS_ENDPOINT_URL
         ? { accessKeyId: "test", secretAccessKey: "test" }
@@ -36,19 +60,19 @@ export async function handler(event) {
   return runtimeHandler(event);
 }
 
-function parseBody(event) {
+function parseBody(event: ApiGatewayEvent): PaymentBody {
   if (!event?.body) {
     return {};
   }
 
   if (typeof event.body === "string") {
-    return JSON.parse(event.body);
+    return JSON.parse(event.body) as PaymentBody;
   }
 
-  return event.body;
+  return event.body as PaymentBody;
 }
 
-function requiredEnv(name) {
+function requiredEnv(name: string): string {
   const value = process.env[name];
 
   if (!value) {

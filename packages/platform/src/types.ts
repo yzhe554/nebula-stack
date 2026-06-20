@@ -1,4 +1,4 @@
-export type ServiceType = "lambda" | "dynamodb";
+export type ServiceType = "lambda" | "dynamodb" | "apigateway";
 
 export type ServiceMetadata = {
   env: string;
@@ -43,6 +43,19 @@ export type DynamoDbConfig = {
   pointInTimeRecovery: boolean;
 };
 
+export type ApiGatewayConfig = {
+  description?: string;
+  routes: ApiGatewayRoute[];
+};
+
+export type ApiGatewayRoute = {
+  path: string;
+  method: "ANY" | "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+  target:
+    | { type: "http_proxy"; uri: string }
+    | { type: "lambda"; service: string };
+};
+
 export type LoadedService =
   | {
       metadata: ServiceMetadata & { serviceType: "lambda" };
@@ -51,6 +64,10 @@ export type LoadedService =
   | {
       metadata: ServiceMetadata & { serviceType: "dynamodb" };
       config: DynamoDbConfig;
+    }
+  | {
+      metadata: ServiceMetadata & { serviceType: "apigateway" };
+      config: ApiGatewayConfig;
     };
 
 export type NetworkFlow = {

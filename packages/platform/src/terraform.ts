@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { LoadedService, ServiceMetadata } from "./types.js";
+import type { ApiGatewayRoute, LoadedService, ServiceMetadata } from "./types";
 
 export type TerraformJson = Record<string, unknown>;
 export type DeployTarget = "aws" | "floci";
@@ -10,11 +10,21 @@ export type TerraformOptions = {
   serviceNames?: Record<string, string>;
 };
 
+type ApiGatewayLambdaRoute = ApiGatewayRoute & {
+  target: Extract<ApiGatewayRoute["target"], { type: "lambda" }>;
+};
+
 const flociEndpointUrl = "http://localhost.floci.io:4566";
+const awsRegion = "ap-southeast-2";
+const flociRegion = "us-east-1";
 
 export function terraformForService(service: LoadedService, options: TerraformOptions = {}): TerraformJson {
   if (isLambdaService(service)) {
     return terraformForLambda(service, options);
+  }
+
+  if (isApiGatewayService(service)) {
+    return terraformForApiGateway(service, options);
   }
 
   return terraformForDynamoDb(service, options);
@@ -24,6 +34,12 @@ function isLambdaService(
   service: LoadedService,
 ): service is Extract<LoadedService, { metadata: { serviceType: "lambda" } }> {
   return service.metadata.serviceType === "lambda";
+}
+
+function isApiGatewayService(
+  service: LoadedService,
+): service is Extract<LoadedService, { metadata: { serviceType: "apigateway" } }> {
+  return service.metadata.serviceType === "apigateway";
 }
 
 function terraformForLambda(
@@ -153,12 +169,141 @@ function lambdaDynamoDbPolicies(
           Statement: service.config.permissions.dynamodb.map((permission) => ({
             Effect: "Allow",
             Action: permission.actions,
-            Resource: `arn:aws:dynamodb:ap-southeast-2:*:table/${tableNameForService(permission.service, options)}`,
+            Resource: `arn:aws:dynamodb:${regionForTarget(options.target ?? "aws")}:*:table/${tableNameForService(permission.service, options)}`,
           })),
         }),
       },
     },
   };
+}
+
+function terraformForApiGateway(
+  service: Extract<LoadedService, { metadata: { serviceType: "apigateway" } }>,
+  options: TerraformOptions,
+): TerraformJson {
+  const resourceName = terraformName(service.metadata.serviceName);
+
+  return baseTerraform(service.metadata, options, {
+    aws_apigatewayv2_api: {
+      [resourceName]: {
+        name: physicalName(service.metadata),
+        protocol_type: "HTTP",
+        description: service.config.description,
+        tags: tagsFor(service.metadata),
+      },
+    },
+    aws_apigatewayv2_stage: {
+      [`${resourceName}_default`]: {
+        api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+        name: "$default",
+        auto_deploy: true,
+        ...apiGatewayStageTagConfig(service.metadata, options),
+      },
+    },
+    aws_apigatewayv2_integration: Object.fromEntries(service.config.routes.map((route) => {
+      const routeName = apiGatewayRouteName(resourceName, route);
+
+      return [routeName, {
+        api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+        integration_type: route.target.type === "http_proxy" ? "HTTP_PROXY" : "AWS_PROXY",
+        integration_method: route.method,
+        integration_uri: apiGatewayIntegrationUri(route, options),
+        payload_format_version: route.target.type === "lambda" ? "2.0" : undefined,
+      }];
+    })),
+    aws_apigatewayv2_route: Object.fromEntries(service.config.routes.map((route) => {
+      const routeName = apiGatewayRouteName(resourceName, route);
+
+      return [routeName, {
+        api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+        route_key: `${route.method} ${route.path}`,
+        target: `integrations/\${aws_apigatewayv2_integration.${routeName}.id}`,
+      }];
+    })),
+    ...apiGatewayLambdaPermissions(service, resourceName, options),
+  });
+}
+
+function apiGatewayStageTagConfig(metadata: ServiceMetadata, options: TerraformOptions): Record<string, unknown> {
+  if (options.target === "floci") {
+    return {
+      lifecycle: {
+        ignore_changes: ["tags", "tags_all"],
+      },
+    };
+  }
+
+  return {
+    tags: tagsFor(metadata),
+  };
+}
+
+function apiGatewayLambdaPermissions(
+  service: Extract<LoadedService, { metadata: { serviceType: "apigateway" } }>,
+  resourceName: string,
+  options: TerraformOptions,
+): Record<string, unknown> {
+  const lambdaRoutes = service.config.routes.filter(isApiGatewayLambdaRoute);
+
+  if (lambdaRoutes.length === 0) {
+    return {};
+  }
+
+  return {
+    aws_lambda_permission: Object.fromEntries(lambdaRoutes.map((route) => {
+      const routeName = apiGatewayRouteName(resourceName, route);
+      const lambdaName = lambdaNameForService(route.target.service, options);
+
+      return [routeName, {
+        statement_id: `${routeName}_allow_apigateway`,
+        action: "lambda:InvokeFunction",
+        function_name: lambdaName,
+        principal: "apigateway.amazonaws.com",
+        source_arn: `\${aws_apigatewayv2_api.${resourceName}.execution_arn}/*/*`,
+      }];
+    })),
+  };
+}
+
+function isApiGatewayLambdaRoute(
+  route: ApiGatewayRoute,
+): route is ApiGatewayLambdaRoute {
+  return route.target.type === "lambda";
+}
+
+function apiGatewayIntegrationUri(
+  route: ApiGatewayRoute,
+  options: TerraformOptions,
+): string {
+  if (route.target.type === "http_proxy") {
+    return route.target.uri;
+  }
+
+  const lambdaName = lambdaNameForService(route.target.service, options);
+
+  const region = regionForTarget(options.target ?? "aws");
+
+  return `arn:aws:apigateway:${region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${region}:*:function:${lambdaName}/invocations`;
+}
+
+function lambdaNameForService(serviceName: string, options: TerraformOptions): string {
+  const configuredName = options.serviceNames?.[serviceName];
+  if (configuredName) {
+    return configuredName;
+  }
+
+  throw new Error(`apigateway route references unknown Lambda service ${serviceName}`);
+}
+
+function apiGatewayRouteName(
+  resourceName: string,
+  route: ApiGatewayRoute,
+): string {
+  const pathName = route.path === "/{proxy+}"
+    ? "proxy"
+    : route.path.replace(/^\//, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
+  return terraformName(`${resourceName}_${route.target.type}_${pathName || "root"}`);
 }
 
 function tableNameForService(
@@ -221,7 +366,7 @@ function baseTerraform(metadata: ServiceMetadata, options: TerraformOptions, res
 
 function providerConfig(metadata: ServiceMetadata, target: DeployTarget): Record<string, unknown> {
   const base = {
-    region: "ap-southeast-2",
+    region: regionForTarget(target),
     default_tags: {
       tags: tagsFor(metadata),
     },
@@ -240,6 +385,8 @@ function providerConfig(metadata: ServiceMetadata, target: DeployTarget): Record
     skip_requesting_account_id: true,
     s3_use_path_style: true,
     endpoints: {
+      apigateway: "http://localhost:4566",
+      apigatewayv2: "http://localhost:4566",
       dynamodb: "http://localhost:4566",
       iam: "http://localhost:4566",
       lambda: "http://localhost:4566",
@@ -248,6 +395,10 @@ function providerConfig(metadata: ServiceMetadata, target: DeployTarget): Record
       sts: "http://localhost:4566",
     },
   };
+}
+
+function regionForTarget(target: DeployTarget): string {
+  return target === "floci" ? flociRegion : awsRegion;
 }
 
 function tagsFor(metadata: ServiceMetadata): Record<string, string> {

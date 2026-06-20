@@ -34,9 +34,31 @@ floci status
 pnpm floci:deploy:all
 ```
 
-This packages `apps/payment-api`, deploys `customer-records`, then deploys `payment-api` to Floci.
+This packages `apps/payment-api`, deploys `customer-records`, then deploys `payment-api` and the docs API Gateway to Floci.
 
-## 3. Invoke The Lambda
+## 3. Open The Local API Gateway
+
+Start the docs app with the same base path Floci uses for the deployed HTTP API:
+
+```bash
+pnpm docs:dev:floci
+```
+
+Floci serves HTTP APIs through its path-style local execute endpoint. Get the generated API id:
+
+```bash
+pnpm floci:url
+```
+
+Then open:
+
+```text
+http://localhost:4566/execute-api/<api-id>/$default/
+```
+
+The root route proxies to `apps/docs`, and `POST /api/payments` invokes the Lambda route.
+
+## 4. Invoke The Lambda
 
 ```bash
 pnpm floci:invoke:payment-api customer-demo-1 approved-from-demo
@@ -48,7 +70,7 @@ Expected response:
 {"statusCode":200,"body":"{\"customerId\":\"customer-demo-1\",\"stored\":true}"}
 ```
 
-## 4. Verify DynamoDB
+## 5. Verify DynamoDB
 
 ```bash
 pnpm floci:get:item customer-demo-1
@@ -85,7 +107,7 @@ To reset/cleanup and redeploy everything:
 pnpm floci:redeploy:all
 ```
 
-This deletes the local Lambda, log group, IAM role/policies, and DynamoDB table, removes local generated Terraform state under each service folder's `__generated__/floci`, packages the Lambda, and redeploys both services.
+This deletes the local Lambda, log group, IAM role/policies, and DynamoDB table, removes local generated Terraform state under each service folder's `__generated__/floci`, packages the Lambda, and redeploys all demo services including the docs API Gateway.
 
 ## Stop Floci
 

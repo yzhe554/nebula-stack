@@ -6,7 +6,7 @@ if [[ "${1:-}" == "--" ]]; then
   shift
 fi
 
-TABLE_NAME="dev-venture-core-restricted-customer-records"
+TABLE_NAME="dev-venture-core-managed-customer-records"
 CUSTOMER_ID="${1:-customer-demo-1}"
 ENDPOINT_URL="http://localhost:4566"
 

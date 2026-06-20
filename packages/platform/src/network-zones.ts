@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "yaml";
-import { networkPolicySchema } from "./schemas.js";
-import type { NetworkPolicy, ServiceMetadata } from "./types.js";
+import { networkPolicySchema } from "./schemas";
+import type { NetworkPolicy, ServiceMetadata } from "./types";
 
 export type LoadNetworkPolicyOptions = {
   env: string;
@@ -42,9 +42,30 @@ export async function validateServiceNetworkZones(
     }
 
     if (!policy.zones[service.securityZone]) {
+      if (service.serviceType === "dynamodb" && service.securityZone === "managed") {
+        validateDynamoDbEndpoint(service, policy);
+        continue;
+      }
+
       throw new Error(
         `Security zone ${service.securityZone} is not defined for ${service.env}/${service.venture}/${service.vpc} (${service.sourcePath})`,
       );
     }
+
+    if (service.serviceType === "dynamodb") {
+      validateDynamoDbEndpoint(service, policy);
+    }
   }
+}
+
+function validateDynamoDbEndpoint(service: ServiceMetadata, policy: NetworkPolicy): void {
+  const endpoint = policy.awsEndpoints.dynamodb;
+
+  if (endpoint?.type === "gateway" && endpoint.policy === "default" && endpoint.routeTableZoneNames?.length) {
+    return;
+  }
+
+  throw new Error(
+    `DynamoDB service ${service.serviceName} requires awsEndpoints.dynamodb default gateway endpoint (${service.sourcePath})`,
+  );
 }

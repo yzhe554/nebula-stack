@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
-import Ajv2020Module from "ajv/dist/2020.js";
+import type { ErrorObject } from "ajv";
+import Ajv2020 from "ajv/dist/2020";
 import { parse } from "yaml";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { generateSchemaObject, platformJsonSchemas } from "../../src/schema-json.js";
+import { generateSchemaObject, platformJsonSchemas } from "../../src/schema-json";
 
 describe("service JSON schemas", () => {
   test("generates JSON schemas through the Zod schema instance", () => {
@@ -50,7 +51,7 @@ describe("service JSON schemas", () => {
 
   test("dynamodb schema validates the sample DynamoDB YAML", async () => {
     const validate = await compileSchema("schemas/dynamodb.schema.json");
-    const yaml = parse(await readFile("../../infra/services/dev/venture/core/restricted/customer-records.dynamodb.yaml", "utf8"));
+    const yaml = parse(await readFile("../../infra/services/dev/venture/core/managed/customer-records.dynamodb.yaml", "utf8"));
 
     expect(validate(yaml), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
@@ -68,7 +69,7 @@ describe("service JSON schemas", () => {
       environment: {},
       permissions: { dynamodb: [] },
     })).toBe(false);
-    expect(validate.errors?.some((error) => error.instancePath === "/runtime" && error.keyword === "enum")).toBe(true);
+    expect(validate.errors?.some((error: ErrorObject) => error.instancePath === "/runtime" && error.keyword === "enum")).toBe(true);
   });
 
   test("network schema validates the sample network policy", async () => {
@@ -80,7 +81,7 @@ describe("service JSON schemas", () => {
 });
 
 async function compileSchema(schemaPath: string) {
-  const ajv = new Ajv2020Module.default({ allErrors: true });
+  const ajv = new Ajv2020({ allErrors: true });
   const schema = JSON.parse(await readFile(schemaPath, "utf8"));
   return ajv.compile(schema);
 }

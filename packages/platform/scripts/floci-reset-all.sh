@@ -4,13 +4,15 @@ source "$(dirname "$0")/floci-env.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PAYMENT_API_DIR="$REPO_ROOT/infra/services/dev/venture/core/internal/__generated__/floci/payment-api"
-CUSTOMER_RECORDS_DIR="$REPO_ROOT/infra/services/dev/venture/core/restricted/__generated__/floci/customer-records"
+CUSTOMER_RECORDS_DIR="$REPO_ROOT/infra/services/dev/venture/core/managed/__generated__/floci/customer-records"
+DOCS_DIR="$REPO_ROOT/infra/services/dev/venture/core/public/__generated__/floci/docs"
 ENDPOINT_URL="http://localhost:4566"
 FUNCTION_NAME="dev-venture-core-internal-payment-api"
 ROLE_NAME="dev-venture-core-internal-payment-api-lambda-role"
 INLINE_POLICY_NAME="dev-venture-core-internal-payment-api-dynamodb-access"
 BASIC_EXECUTION_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 LOG_GROUP_NAME="/aws/lambda/dev-venture-core-internal-payment-api"
+API_GATEWAY_NAME="dev-venture-core-public-docs"
 
 run_or_ignore_not_found() {
   local description="$1"
@@ -31,6 +33,30 @@ run_or_ignore_not_found() {
     return 1
   fi
 }
+
+delete_api_gateway() {
+  echo "Deleting local Floci API Gateway: $API_GATEWAY_NAME"
+  if ! api_ids="$(aws --endpoint-url="$ENDPOINT_URL" apigatewayv2 get-apis --query "Items[?Name=='$API_GATEWAY_NAME'].ApiId" --output text 2>&1)"; then
+    if [[ "$api_ids" == *"NotFound"* ]]; then
+      echo "  Already absent"
+      return 0
+    fi
+
+    echo "$api_ids" >&2
+    return 1
+  fi
+
+  if [[ -z "$api_ids" || "$api_ids" == "None" ]]; then
+    echo "  Already absent"
+    return 0
+  fi
+
+  for api_id in $api_ids; do
+    aws --endpoint-url="$ENDPOINT_URL" apigatewayv2 delete-api --api-id "$api_id"
+  done
+}
+
+delete_api_gateway
 
 run_or_ignore_not_found \
   "Deleting local Floci Lambda function: $FUNCTION_NAME" \
@@ -61,5 +87,5 @@ run_or_ignore_not_found \
 
 "$(dirname "$0")/floci-ddb-reset.sh"
 
-rm -rf "$PAYMENT_API_DIR" "$CUSTOMER_RECORDS_DIR"
+rm -rf "$PAYMENT_API_DIR" "$CUSTOMER_RECORDS_DIR" "$DOCS_DIR"
 echo "Removed local generated Floci Terraform state under infra/services/**/__generated__/floci"

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "package": "rm -rf dist/payment-api-package dist/payment-api.zip && mkdir -p dist/payment-api-package && rolldown -c rolldown.config.mjs && printf '{\"type\":\"module\"}\n' > dist/payment-api-package/package.json && cd dist/payment-api-package && zip -r ../payment-api.zip index.js package.json",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

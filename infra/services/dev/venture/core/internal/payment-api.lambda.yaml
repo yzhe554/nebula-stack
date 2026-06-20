@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../../../packages/platform/schemas/lambda.schema.json
+# yaml-language-server: $schema=../../../../../../packages/platform/schemas/lambda.schema.json
 runtime: nodejs22.x
 handler: index.handler
 package: ../../../../../../apps/payment-api/dist/payment-api.zip

@@ -39,7 +39,7 @@
 ### Task 3: Move Payment API App
 
 **Files:**
-- Keep source under: `apps/payment-api/index.mjs`
+- Keep source under: `apps/payment-api/index.ts`
 - Move: `tests/apps/payment-api/*` to `apps/payment-api/tests/*`
 - Move: `rolldown.payment-api.config.mjs` to `apps/payment-api/rolldown.config.mjs`
 - Create: `apps/payment-api/package.json`

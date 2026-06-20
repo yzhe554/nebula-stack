@@ -16,7 +16,7 @@ Example:
 
 ```text
 infra/services/dev/venture/core/internal/payment-api.lambda.yaml
-infra/services/dev/venture/core/restricted/customer-records.dynamodb.yaml
+infra/services/dev/venture/core/managed/customer-records.dynamodb.yaml
 infra/services/prod/venture/core/internal/payment-api.lambda.yaml
 ```
 

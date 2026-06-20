@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../../../../../../packages/platform/schemas/dynamodb.schema.json
+billingMode: PAY_PER_REQUEST
+hashKey:
+  name: customerId
+  type: S
+pointInTimeRecovery: true

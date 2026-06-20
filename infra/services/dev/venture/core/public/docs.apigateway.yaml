@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../../../../packages/platform/schemas/apigateway.schema.json
+description: Docs app and payment API ingress.
+routes:
+  - path: /
+    method: ANY
+    target:
+      type: http_proxy
+      uri: http://host.docker.internal:3001/
+  - path: /{proxy+}
+    method: ANY
+    target:
+      type: http_proxy
+      uri: http://host.docker.internal:3001/{proxy}
+  - path: /api/payments
+    method: POST
+    target:
+      type: lambda
+      service: payment-api

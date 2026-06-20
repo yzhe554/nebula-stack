@@ -539,7 +539,7 @@ Expected: PASS.
 
 **Files:**
 - Create: `infra/services/dev/core/internal/payment-api.lambda.yaml`
-- Create: `infra/services/dev/core/restricted/customer-records.dynamodb.yaml`
+- Create: `infra/services/dev/core/managed/customer-records.dynamodb.yaml`
 
 - [ ] **Step 1: Create Lambda example**
 

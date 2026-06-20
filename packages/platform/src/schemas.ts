@@ -1,3 +1,4 @@
-export * from "../schemas/lambda.schema.js";
-export * from "../schemas/dynamodb.schema.js";
-export * from "../schemas/network.schema.js";
+export * from "../schemas/lambda.schema";
+export * from "../schemas/dynamodb.schema";
+export * from "../schemas/network.schema";
+export * from "../schemas/apigateway.schema";
