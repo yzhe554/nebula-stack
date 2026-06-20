@@ -4,6 +4,7 @@ source "$(dirname "$0")/floci-env.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PAYMENT_API_DIR="$REPO_ROOT/infra/services/dev/venture/core/internal/__generated__/floci/payment-api"
+PAYMENT_API_INGRESS_DIR="$REPO_ROOT/infra/services/dev/venture/core/internal/__generated__/floci/payment-api-ingress"
 CUSTOMER_RECORDS_DIR="$REPO_ROOT/infra/services/dev/venture/core/managed/__generated__/floci/customer-records"
 DOCS_DIR="$REPO_ROOT/infra/services/dev/venture/core/public/__generated__/floci/docs"
 ENDPOINT_URL="http://localhost:4566"
@@ -12,7 +13,7 @@ ROLE_NAME="dev-venture-core-internal-payment-api-lambda-role"
 INLINE_POLICY_NAME="dev-venture-core-internal-payment-api-dynamodb-access"
 BASIC_EXECUTION_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 LOG_GROUP_NAME="/aws/lambda/dev-venture-core-internal-payment-api"
-API_GATEWAY_NAME="dev-venture-core-public-docs"
+API_GATEWAY_NAMES=("dev-venture-core-public-docs" "dev-venture-core-internal-payment-api-ingress")
 
 run_or_ignore_not_found() {
   local description="$1"
@@ -35,6 +36,7 @@ run_or_ignore_not_found() {
 }
 
 delete_api_gateway() {
+  local API_GATEWAY_NAME="$1"
   echo "Deleting local Floci API Gateway: $API_GATEWAY_NAME"
   if ! api_ids="$(aws --endpoint-url="$ENDPOINT_URL" apigatewayv2 get-apis --query "Items[?Name=='$API_GATEWAY_NAME'].ApiId" --output text 2>&1)"; then
     if [[ "$api_ids" == *"NotFound"* ]]; then
@@ -56,7 +58,9 @@ delete_api_gateway() {
   done
 }
 
-delete_api_gateway
+for api_gateway_name in "${API_GATEWAY_NAMES[@]}"; do
+  delete_api_gateway "$api_gateway_name"
+done
 
 run_or_ignore_not_found \
   "Deleting local Floci Lambda function: $FUNCTION_NAME" \
@@ -87,5 +91,5 @@ run_or_ignore_not_found \
 
 "$(dirname "$0")/floci-ddb-reset.sh"
 
-rm -rf "$PAYMENT_API_DIR" "$CUSTOMER_RECORDS_DIR" "$DOCS_DIR"
+rm -rf "$PAYMENT_API_DIR" "$PAYMENT_API_INGRESS_DIR" "$CUSTOMER_RECORDS_DIR" "$DOCS_DIR"
 echo "Removed local generated Floci Terraform state under infra/services/**/__generated__/floci"

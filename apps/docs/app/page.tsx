@@ -183,8 +183,8 @@ export default function Home() {
             <h2>Local ingress uses Floci path-style URLs</h2>
             <p>
               After <code>pnpm floci:deploy:all</code>, get the HTTP API id from Floci and open
-              <code>{apiGatewayUrl}</code>. The `/docs` route proxies to this docs app and
-              <code>/api/payments</code> invokes the Lambda route.
+              <code>{apiGatewayUrl}</code>. The `/docs` route proxies to this docs app. The payment
+              API is exposed through its own internal API Gateway.
             </p>
           </div>
         </section>

@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../../../../../../packages/platform/schemas/apigateway.schema.json
-description: Docs app and payment API ingress.
+description: Docs app ingress.
 domain:
   floci:
     name: app.localhost.floci.io
@@ -20,8 +20,3 @@ routes:
     target:
       type: http_proxy
       uri: http://host.docker.internal:3001/docs/{proxy}
-  - path: /api/payments
-    method: POST
-    target:
-      type: lambda
-      service: payment-api

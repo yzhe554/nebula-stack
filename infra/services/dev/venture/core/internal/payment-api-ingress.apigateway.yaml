@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../../../../packages/platform/schemas/apigateway.schema.json
+description: Payment API internal ingress.
+routes:
+  - path: /api/payments
+    method: POST
+    target:
+      type: lambda
+      service: payment-api

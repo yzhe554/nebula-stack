@@ -270,7 +270,7 @@ describe("terraformForService", () => {
     });
   });
 
-  test("generates HTTP API Gateway routes for HTTP proxy and Lambda targets", () => {
+  test("generates public docs API Gateway routes with Route53", () => {
     const service: LoadedService = {
       metadata: {
         env: "dev",
@@ -282,7 +282,7 @@ describe("terraformForService", () => {
         sourcePath: "infra/services/dev/venture/core/public/docs.apigateway.yaml",
       },
       config: {
-        description: "Docs and API gateway",
+        description: "Docs app ingress.",
         domain: {
           floci: {
             name: "app.localhost.floci.io",
@@ -307,23 +307,11 @@ describe("terraformForService", () => {
             method: "ANY",
             target: { type: "http_proxy", uri: "http://host.docker.internal:3001/docs/{proxy}" },
           },
-          {
-            path: "/api/payments",
-            method: "POST",
-            target: { type: "lambda", service: "payment-api" },
-          },
         ],
       },
     };
 
-    const terraform = terraformResult(
-      terraformForService(service, {
-        target: "floci",
-        serviceNames: {
-          "payment-api": "dev-venture-core-internal-payment-api",
-        },
-      }),
-    );
+    const terraform = terraformResult(terraformForService(service, { target: "floci" }));
 
     expect(resource(terraform, "aws_apigatewayv2_api", "docs")).toMatchObject({
       name: "dev-venture-core-public-docs",
@@ -350,43 +338,19 @@ describe("terraformForService", () => {
       integration_method: "ANY",
     });
     expect(
-      resource(terraform, "aws_apigatewayv2_integration", "docs_lambda_api_payments"),
-    ).toMatchObject({
-      api_id: "${aws_apigatewayv2_api.docs.id}",
-      integration_type: "AWS_PROXY",
-      integration_uri:
-        "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:*:function:dev-venture-core-internal-payment-api/invocations",
-      payload_format_version: "2.0",
-    });
-    expect(
       resource(terraform, "aws_apigatewayv2_route", "docs_http_proxy_docs_proxy").route_key,
     ).toBe("ANY /docs/{proxy+}");
     expect(resource(terraform, "aws_apigatewayv2_route", "docs_http_proxy_docs").route_key).toBe(
       "ANY /docs",
     );
-    expect(
-      resource(terraform, "aws_apigatewayv2_route", "docs_lambda_api_payments").route_key,
-    ).toBe("POST /api/payments");
-    expect(resource(terraform, "aws_lambda_permission", "docs_lambda_api_payments")).toMatchObject({
-      action: "lambda:InvokeFunction",
-      function_name: "dev-venture-core-internal-payment-api",
-      principal: "apigateway.amazonaws.com",
-      source_arn: "${aws_apigatewayv2_api.docs.execution_arn}/*/*",
-    });
+    expect(terraform.resource.aws_lambda_permission).toBeUndefined();
     expect(terraform.resource.aws_apigatewayv2_domain_name).toBeUndefined();
     expect(terraform.resource.aws_apigatewayv2_api_mapping).toBeUndefined();
     expect(terraform.data).toEqual({});
     expect(terraform.resource.aws_route53_zone).toBeUndefined();
     expect(terraform.resource.aws_route53_record).toBeUndefined();
 
-    const awsTerraform = terraformResult(
-      terraformForService(service, {
-        target: "aws",
-        serviceNames: {
-          "payment-api": "dev-venture-core-internal-payment-api",
-        },
-      }),
-    );
+    const awsTerraform = terraformResult(terraformForService(service, { target: "aws" }));
 
     expect(
       resource(awsTerraform, "aws_apigatewayv2_stage", "docs_default").lifecycle,
@@ -500,6 +464,63 @@ describe("terraformForService", () => {
         "domain_name_configuration",
       ).certificate_arn,
     ).toBe("arn:aws:acm:ap-southeast-2:123456789012:certificate/example");
+  });
+
+  test("generates API Gateway without Route53 for internal Lambda ingress", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "internal",
+        serviceName: "payment-api-ingress",
+        serviceType: "apigateway",
+        sourcePath: "infra/services/dev/venture/core/internal/payment-api-ingress.apigateway.yaml",
+      },
+      config: {
+        description: "Payment API internal ingress.",
+        routes: [
+          {
+            path: "/api/payments",
+            method: "POST",
+            target: { type: "lambda", service: "payment-api" },
+          },
+        ],
+      },
+    };
+
+    const terraform = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: {
+          "payment-api": "dev-venture-core-internal-payment-api",
+        },
+      }),
+    );
+
+    expect(resource(terraform, "aws_apigatewayv2_api", "payment_api_ingress")).toMatchObject({
+      name: "dev-venture-core-internal-payment-api-ingress",
+      protocol_type: "HTTP",
+    });
+    expect(
+      resource(
+        terraform,
+        "aws_apigatewayv2_integration",
+        "payment_api_ingress_lambda_api_payments",
+      ),
+    ).toMatchObject({
+      api_id: "${aws_apigatewayv2_api.payment_api_ingress.id}",
+      integration_type: "AWS_PROXY",
+      payload_format_version: "2.0",
+    });
+    expect(
+      resource(terraform, "aws_apigatewayv2_route", "payment_api_ingress_lambda_api_payments")
+        .route_key,
+    ).toBe("POST /api/payments");
+    expect(terraform.resource.aws_apigatewayv2_domain_name).toBeUndefined();
+    expect(terraform.resource.aws_apigatewayv2_api_mapping).toBeUndefined();
+    expect(terraform.resource.aws_route53_record).toBeUndefined();
+    expect(terraform.data.aws_route53_zone).toBeUndefined();
   });
 
   test("injects local AWS endpoint URL for Floci Lambda deployments", () => {

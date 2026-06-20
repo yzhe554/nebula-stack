@@ -1,13 +1,6 @@
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
-
-type ApiGatewayEvent = {
-  body?: string | Record<string, unknown> | null;
-};
-
-type ApiGatewayResponse = {
-  statusCode: number;
-  body: string;
-};
+import { Hono } from "hono";
+import { handle } from "hono/aws-lambda";
 
 type PaymentBody = {
   customerId?: string;
@@ -21,14 +14,16 @@ type DynamoDbSender = {
   send(command: PutItemCommand): Promise<unknown>;
 };
 
-type HandlerOptions = {
+type AppOptions = {
   tableName: string;
   dynamoDbClient: DynamoDbSender;
 };
 
-export function createHandler({ tableName, dynamoDbClient }: HandlerOptions) {
-  return async function handlePayment(event: ApiGatewayEvent): Promise<ApiGatewayResponse> {
-    const body = parseBody(event);
+export function createApp({ tableName, dynamoDbClient }: AppOptions) {
+  const app = new Hono();
+
+  app.post("/api/payments", async (context) => {
+    const body = paymentBodyFrom(await context.req.json().catch(() => ({})));
     const customerId = body.customerId ?? body.paymentId ?? `customer-${Date.now()}`;
     const message = body.message ?? "created";
 
@@ -42,15 +37,28 @@ export function createHandler({ tableName, dynamoDbClient }: HandlerOptions) {
       }),
     );
 
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ customerId, stored: true }),
-    };
-  };
+    return context.json({ customerId, stored: true });
+  });
+
+  return app;
 }
 
-export async function handler(event: ApiGatewayEvent): Promise<ApiGatewayResponse> {
-  const runtimeHandler = createHandler({
+export function createLambdaHandler(options: AppOptions) {
+  return handle(createApp(options));
+}
+
+type LambdaHandler = ReturnType<typeof handle>;
+
+let runtimeHandler: LambdaHandler | undefined;
+
+export function handler(...args: Parameters<LambdaHandler>) {
+  runtimeHandler ??= createLambdaHandler(createRuntimeOptions());
+
+  return runtimeHandler(...args);
+}
+
+function createRuntimeOptions(): AppOptions {
+  return {
     tableName: requiredEnv("TABLE_NAME"),
     dynamoDbClient: new DynamoDBClient({
       region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
@@ -59,21 +67,7 @@ export async function handler(event: ApiGatewayEvent): Promise<ApiGatewayRespons
         ? { accessKeyId: "test", secretAccessKey: "test" }
         : undefined,
     }),
-  });
-
-  return runtimeHandler(event);
-}
-
-function parseBody(event: ApiGatewayEvent): PaymentBody {
-  if (!event?.body) {
-    return {};
-  }
-
-  if (typeof event.body === "string") {
-    return paymentBodyFrom(JSON.parse(event.body));
-  }
-
-  return paymentBodyFrom(event.body);
+  };
 }
 
 function paymentBodyFrom(value: unknown): PaymentBody {

@@ -85,6 +85,9 @@ importers:
       '@aws-sdk/client-dynamodb':
         specifier: ^3.1072.0
         version: 3.1072.0
+      hono:
+        specifier: ^4.12.26
+        version: 4.12.26
     devDependencies:
       rolldown:
         specifier: ^1.1.2
@@ -1293,6 +1296,10 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  hono@4.12.26:
+    resolution: {integrity: sha512-uyZtpnYxM9CmQ7QsQknM4zN8EftNqhON1qYeIKM0Se67CCEe2c44xyGURwB0axX2fBDu1dqHrHAc1hmNT8ITkw==}
+    engines: {node: '>=16.9.0'}
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
@@ -2642,6 +2649,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  hono@4.12.26: {}
 
   json-schema-traverse@1.0.0: {}
 
