@@ -6,6 +6,9 @@
   "scripts": {
     "setup:local": "./scripts/setup-local.sh",
     "build": "turbo build",
+    "docs:dev": "pnpm --filter @repo/docs run dev",
+    "docs:build": "pnpm --filter @repo/docs run build",
+    "docs:reset": "pnpm --filter @repo/docs run reset",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
     "app:payment-api:package": "pnpm --filter @repo/payment-api run package",

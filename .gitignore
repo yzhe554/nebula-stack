@@ -1,8 +1,11 @@
 node_modules/
 .turbo/
+.next/
 .env.local
 .terraformrc.local
 .terraform-plugin-cache/
+.terraform-provider-mirror/
+next-env.d.ts
 generated/
 __generated__/
 .terraform/
