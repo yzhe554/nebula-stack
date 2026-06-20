@@ -1,8 +1,21 @@
 import { describe, expect, test } from "vitest";
+import { generatedDirectoryForService } from "../../src/generated-paths.js";
 import { terraformForService } from "../../src/terraform.js";
 import type { LoadedService } from "../../src/types.js";
 
 describe("terraformForService", () => {
+  test("generates Terraform beside the source service folder", () => {
+    expect(generatedDirectoryForService({
+      env: "dev",
+      venture: "venture",
+      vpc: "core",
+      securityZone: "internal",
+      serviceName: "payment-api",
+      serviceType: "lambda",
+      sourcePath: "infra/services/dev/venture/core/internal/payment-api.lambda.yaml",
+    }, "floci")).toBe("infra/services/dev/venture/core/internal/__generated__/floci/payment-api");
+  });
+
   test("generates protected DynamoDB Terraform JSON", () => {
     const service: LoadedService = {
       metadata: {
@@ -55,7 +68,7 @@ describe("terraformForService", () => {
       config: {
         runtime: "nodejs22.x",
         handler: "index.handler",
-        package: "../../dist/payment-api.zip",
+        package: "../../../../../../apps/payment-api/dist/payment-api.zip",
         memoryMb: 128,
         timeoutSeconds: 10,
         logRetentionDays: 7,
@@ -73,6 +86,7 @@ describe("terraformForService", () => {
 
     const terraform = terraformForService(service, {
       target: "aws",
+      moduleDirectory: "infra/services/dev/venture/core/internal/__generated__/aws/payment-api",
       serviceNames: {
         "customer-records": "dev-venture-core-restricted-customer-records",
       },
@@ -82,7 +96,6 @@ describe("terraformForService", () => {
 
     expect(fn).toMatchObject({
       function_name: "dev-venture-core-internal-payment-api",
-      filename: "../../dist/payment-api.zip",
       handler: "index.handler",
       runtime: "nodejs22.x",
       memory_size: 128,
@@ -93,6 +106,8 @@ describe("terraformForService", () => {
         },
       },
     });
+    expect(fn.filename).toBe("../../../../../../../../../apps/payment-api/dist/payment-api.zip");
+    expect(fn.source_code_hash).toBe('${filebase64sha256("../../../../../../../../../apps/payment-api/dist/payment-api.zip")}');
     expect(logGroup).toMatchObject({
       name: "/aws/lambda/dev-venture-core-internal-payment-api",
       retention_in_days: 7,

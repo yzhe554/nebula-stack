@@ -1,5 +1,8 @@
 node_modules/
 .turbo/
+.env.local
+.terraformrc.local
+.terraform-plugin-cache/
 generated/
 __generated__/
 .terraform/
@@ -7,3 +10,4 @@ __generated__/
 *.tfstate
 *.tfstate.*
 dist-ts/
+dist/

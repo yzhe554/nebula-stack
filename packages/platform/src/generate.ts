@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { discoverServices } from "./service-discovery.js";
+import { generatedDirectoryForService } from "./generated-paths.js";
 import { terraformForService, type DeployTarget } from "./terraform.js";
 import { validateServiceReferences } from "./validate.js";
 
@@ -19,11 +20,11 @@ const serviceNames = serviceNamesFor(scopedServices);
 const target = args.target ?? "aws";
 
 for (const service of services) {
-  const outputDirectory = path.join(repoRoot, "__generated__", target, service.metadata.env, service.metadata.venture, service.metadata.serviceName);
+  const outputDirectory = generatedDirectoryForService(service.metadata, target);
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(
     path.join(outputDirectory, "main.tf.json"),
-    `${JSON.stringify(terraformForService(service, { target, serviceNames }), null, 2)}\n`,
+    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames }), null, 2)}\n`,
     "utf8",
   );
   console.log(`Generated ${path.relative(repoRoot, outputDirectory)}/main.tf.json from ${path.relative(repoRoot, service.metadata.sourcePath)}`);

@@ -3,13 +3,14 @@ set -euo pipefail
 source "$(dirname "$0")/floci-env.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+GENERATED_DIR="$REPO_ROOT/infra/services/dev/venture/core/restricted/__generated__/floci/customer-records"
 
 TABLE_NAME="dev-venture-core-restricted-customer-records"
 ENDPOINT_URL="http://localhost:4566"
 
 if ! aws --endpoint-url="$ENDPOINT_URL" dynamodb describe-table --table-name "$TABLE_NAME" >/dev/null 2>&1; then
   echo "Local Floci DynamoDB table does not exist: $TABLE_NAME"
-  rm -rf "$REPO_ROOT/__generated__/floci/dev/venture/customer-records"
+  rm -rf "$GENERATED_DIR"
   exit 0
 fi
 
@@ -40,7 +41,7 @@ aws --endpoint-url="$ENDPOINT_URL" dynamodb delete-table \
 for attempt in {1..20}; do
   if ! aws --endpoint-url="$ENDPOINT_URL" dynamodb describe-table --table-name "$TABLE_NAME" >/dev/null 2>&1; then
     echo "Deleted local Floci DynamoDB table: $TABLE_NAME"
-    rm -rf "$REPO_ROOT/__generated__/floci/dev/venture/customer-records"
+    rm -rf "$GENERATED_DIR"
     exit 0
   fi
 

@@ -24,7 +24,7 @@ describe("validateConfigs", () => {
     await writeFile(path.join(root, "infra", "services", "dev", "venture", "core", "internal", "payment-api.lambda.yaml"), [
       "runtime: nodejs22.x",
       "handler: index.handler",
-      "package: ../../../../../dist/payment-api.zip",
+      "package: ../../../../../../apps/payment-api/dist/payment-api.zip",
     ].join("\n"));
 
     const result = await validateConfigs({ env: "dev", venture: "venture", servicesRoot: path.join(root, "infra", "services") });
@@ -38,7 +38,7 @@ describe("validateConfigs", () => {
     await writeFile(path.join(root, "infra", "services", "dev", "venture", "core", "internal", "payment-api.lambda.yaml"), [
       "runtime: nodejs22.x",
       "handler: index.handler",
-      "package: ../../../../../dist/payment-api.zip",
+      "package: ../../../../../../apps/payment-api/dist/payment-api.zip",
       "memoryMb: 128",
       "timeoutSeconds: 10",
       "logRetentionDays: 7",
@@ -103,7 +103,7 @@ async function createValidConfigTree(): Promise<string> {
   await writeFile(path.join(servicesRoot, "internal", "payment-api.lambda.yaml"), [
     "runtime: nodejs22.x",
     "handler: index.handler",
-    "package: ../../../../../dist/payment-api.zip",
+    "package: ../../../../../../apps/payment-api/dist/payment-api.zip",
     "memoryMb: 128",
     "timeoutSeconds: 10",
     "logRetentionDays: 7",

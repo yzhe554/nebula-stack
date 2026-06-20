@@ -8,6 +8,14 @@ This demo deploys the sample DynamoDB table and Lambda to local Floci, invokes t
 - AWS CLI and Terraform are installed.
 - Dependencies are installed with `pnpm install`.
 
+Run the local setup once to create repo-local Terraform provider cache/mirror directories and CLI config:
+
+```bash
+pnpm setup:local
+```
+
+Platform deploy scripts load `.env.local` automatically, so Terraform provider downloads are reused across generated service folders and Terraform can install the cached AWS provider without repeatedly querying the registry.
+
 ## 1. Start Floci
 
 ```bash
@@ -77,7 +85,7 @@ To reset/cleanup and redeploy everything:
 pnpm floci:redeploy:all
 ```
 
-This destroys the local Lambda stack if present, deletes the local DynamoDB table after disabling deletion protection, removes local generated Terraform state under `__generated__/floci/dev/venture`, packages the Lambda, and redeploys both services.
+This deletes the local Lambda, log group, IAM role/policies, and DynamoDB table, removes local generated Terraform state under each service folder's `__generated__/floci`, packages the Lambda, and redeploys both services.
 
 ## Stop Floci
 

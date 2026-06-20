@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { generatedDirectoryForService } from "./generated-paths.js";
 import { discoverServices } from "./service-discovery.js";
 
 import type { DeployTarget } from "./terraform.js";
@@ -22,7 +24,7 @@ run("pnpm", ["platform:generate", "--", "--env", args.env, "--venture", args.ven
 const services = await discoverServices({ env: args.env, venture: args.venture, services: args.services, servicesRoot });
 
 for (const service of services) {
-  const cwd = path.join(repoRoot(), "__generated__", target, service.metadata.env, service.metadata.venture, service.metadata.serviceName);
+  const cwd = generatedDirectoryForService(service.metadata, target);
   run("terraform", ["init"], cwd);
   run("terraform", ["plan", "-out=tfplan"], cwd);
   run("terraform", ["apply", "tfplan"], cwd);
@@ -85,9 +87,41 @@ function parseTarget(value: string): DeployTarget {
 
 function run(command: string, args: string[], cwd: string): void {
   console.log(`Running: ${command} ${args.join(" ")} in ${cwd}`);
-  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
+  const result = spawnSync(command, args, { cwd, stdio: "inherit", env: localEnvironment() });
 
   if (result.status !== 0) {
     throw new Error(`Command failed: ${command} ${args.join(" ")}`);
+  }
+}
+
+function localEnvironment(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...readDotEnvLocal(),
+  };
+}
+
+function readDotEnvLocal(): NodeJS.ProcessEnv {
+  const envPath = path.join(repoRoot(), ".env.local");
+
+  try {
+    return Object.fromEntries(
+      readFileSync(envPath, "utf8")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"))
+        .map((line) => {
+          const separatorIndex = line.indexOf("=");
+          return separatorIndex === -1
+            ? [line, ""]
+            : [line.slice(0, separatorIndex), line.slice(separatorIndex + 1)];
+        }),
+    );
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return {};
+    }
+
+    throw error;
   }
 }

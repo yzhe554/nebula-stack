@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../../../packages/platform/schemas/lambda.schema.json
 runtime: nodejs22.x
 handler: index.handler
-package: ../../../../../dist/payment-api.zip
+package: ../../../../../../apps/payment-api/dist/payment-api.zip
 memoryMb: 128
 timeoutSeconds: 10
 logRetentionDays: 7

@@ -22,7 +22,7 @@ Editors can use the YAML Language Server schema comment for autocomplete, for ex
 # yaml-language-server: $schema=../../../../../packages/platform/schemas/lambda.schema.json
 runtime: nodejs22.x
 handler: index.handler
-package: ../../dist/payment-api.zip
+package: ../../../../../../apps/payment-api/dist/payment-api.zip
 ```
 
 IPv4 network policy example:

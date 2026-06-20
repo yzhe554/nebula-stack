@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { LoadedService, ServiceMetadata } from "./types.js";
 
 export type TerraformJson = Record<string, unknown>;
@@ -5,6 +6,7 @@ export type DeployTarget = "aws" | "floci";
 
 export type TerraformOptions = {
   target?: DeployTarget;
+  moduleDirectory?: string;
   serviceNames?: Record<string, string>;
 };
 
@@ -31,6 +33,7 @@ function terraformForLambda(
   const resourceName = terraformName(service.metadata.serviceName);
   const roleName = `${resourceName}_lambda_role`;
   const logGroupName = `/aws/lambda/${physicalName(service.metadata)}`;
+  const packagePath = lambdaPackagePath(service, options);
 
   return baseTerraform(service.metadata, options, {
     aws_iam_role: {
@@ -66,8 +69,8 @@ function terraformForLambda(
     aws_lambda_function: {
       [resourceName]: {
         function_name: physicalName(service.metadata),
-        filename: service.config.package,
-        source_code_hash: `\${filebase64sha256("${service.config.package}")}`,
+        filename: packagePath,
+        source_code_hash: `\${filebase64sha256("${packagePath}")}`,
         role: `\${aws_iam_role.${roleName}.arn}`,
         handler: service.config.handler,
         runtime: service.config.runtime,
@@ -84,6 +87,24 @@ function terraformForLambda(
       },
     },
   });
+}
+
+function lambdaPackagePath(
+  service: Extract<LoadedService, { metadata: { serviceType: "lambda" } }>,
+  options: TerraformOptions,
+): string {
+  if (!options.moduleDirectory) {
+    return service.config.package;
+  }
+
+  const absolutePackagePath = path.resolve(path.dirname(service.metadata.sourcePath), service.config.package);
+  const relativePackagePath = path.relative(options.moduleDirectory, absolutePackagePath);
+
+  return normalizeTerraformPath(relativePackagePath);
+}
+
+function normalizeTerraformPath(filePath: string): string {
+  return filePath.split(path.sep).join("/");
 }
 
 function lambdaEnvironmentVariables(
