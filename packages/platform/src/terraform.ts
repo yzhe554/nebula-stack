@@ -19,7 +19,10 @@ const flociEndpointUrl = "http://localhost.floci.io:4566";
 const awsRegion = "ap-southeast-2";
 const flociRegion = "us-east-1";
 
-export function terraformForService(service: LoadedService, options: TerraformOptions = {}): TerraformJson {
+export function terraformForService(
+  service: LoadedService,
+  options: TerraformOptions = {},
+): TerraformJson {
   if (isLambdaService(service)) {
     return terraformForLambda(service, options);
   }
@@ -114,7 +117,10 @@ function lambdaPackagePath(
     return service.config.package;
   }
 
-  const absolutePackagePath = path.resolve(path.dirname(service.metadata.sourcePath), service.config.package);
+  const absolutePackagePath = path.resolve(
+    path.dirname(service.metadata.sourcePath),
+    service.config.package,
+  );
   const relativePackagePath = path.relative(options.moduleDirectory, absolutePackagePath);
 
   return normalizeTerraformPath(relativePackagePath);
@@ -186,49 +192,67 @@ function terraformForApiGateway(
 
   const domainTerraform = apiGatewayDomainResources(service, resourceName, options);
 
-  return baseTerraform(service.metadata, options, {
-    aws_apigatewayv2_api: {
-      [resourceName]: {
-        name: physicalName(service.metadata),
-        protocol_type: "HTTP",
-        description: service.config.description,
-        tags: tagsFor(service.metadata),
+  return baseTerraform(
+    service.metadata,
+    options,
+    {
+      aws_apigatewayv2_api: {
+        [resourceName]: {
+          name: physicalName(service.metadata),
+          protocol_type: "HTTP",
+          description: service.config.description,
+          tags: tagsFor(service.metadata),
+        },
       },
-    },
-    aws_apigatewayv2_stage: {
-      [`${resourceName}_default`]: {
-        api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
-        name: "$default",
-        auto_deploy: true,
-        ...apiGatewayStageTagConfig(service.metadata, options),
+      aws_apigatewayv2_stage: {
+        [`${resourceName}_default`]: {
+          api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+          name: "$default",
+          auto_deploy: true,
+          ...apiGatewayStageTagConfig(service.metadata, options),
+        },
       },
+      aws_apigatewayv2_integration: Object.fromEntries(
+        service.config.routes.map((route) => {
+          const routeName = apiGatewayRouteName(resourceName, route);
+
+          return [
+            routeName,
+            {
+              api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+              integration_type: route.target.type === "http_proxy" ? "HTTP_PROXY" : "AWS_PROXY",
+              integration_method: route.method,
+              integration_uri: apiGatewayIntegrationUri(route, options),
+              payload_format_version: route.target.type === "lambda" ? "2.0" : undefined,
+            },
+          ];
+        }),
+      ),
+      aws_apigatewayv2_route: Object.fromEntries(
+        service.config.routes.map((route) => {
+          const routeName = apiGatewayRouteName(resourceName, route);
+
+          return [
+            routeName,
+            {
+              api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+              route_key: `${route.method} ${route.path}`,
+              target: `integrations/\${aws_apigatewayv2_integration.${routeName}.id}`,
+            },
+          ];
+        }),
+      ),
+      ...apiGatewayLambdaPermissions(service, resourceName, options),
+      ...domainTerraform.resource,
     },
-    aws_apigatewayv2_integration: Object.fromEntries(service.config.routes.map((route) => {
-      const routeName = apiGatewayRouteName(resourceName, route);
-
-      return [routeName, {
-        api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
-        integration_type: route.target.type === "http_proxy" ? "HTTP_PROXY" : "AWS_PROXY",
-        integration_method: route.method,
-        integration_uri: apiGatewayIntegrationUri(route, options),
-        payload_format_version: route.target.type === "lambda" ? "2.0" : undefined,
-      }];
-    })),
-    aws_apigatewayv2_route: Object.fromEntries(service.config.routes.map((route) => {
-      const routeName = apiGatewayRouteName(resourceName, route);
-
-      return [routeName, {
-        api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
-        route_key: `${route.method} ${route.path}`,
-        target: `integrations/\${aws_apigatewayv2_integration.${routeName}.id}`,
-      }];
-    })),
-    ...apiGatewayLambdaPermissions(service, resourceName, options),
-    ...domainTerraform.resource,
-  }, domainTerraform.data);
+    domainTerraform.data,
+  );
 }
 
-function apiGatewayStageTagConfig(metadata: ServiceMetadata, options: TerraformOptions): Record<string, unknown> {
+function apiGatewayStageTagConfig(
+  metadata: ServiceMetadata,
+  options: TerraformOptions,
+): Record<string, unknown> {
   if (options.target === "floci") {
     return {
       lifecycle: {
@@ -254,18 +278,23 @@ function apiGatewayLambdaPermissions(
   }
 
   return {
-    aws_lambda_permission: Object.fromEntries(lambdaRoutes.map((route) => {
-      const routeName = apiGatewayRouteName(resourceName, route);
-      const lambdaName = lambdaNameForService(route.target.service, options);
+    aws_lambda_permission: Object.fromEntries(
+      lambdaRoutes.map((route) => {
+        const routeName = apiGatewayRouteName(resourceName, route);
+        const lambdaName = lambdaNameForService(route.target.service, options);
 
-      return [routeName, {
-        statement_id: `${routeName}_allow_apigateway`,
-        action: "lambda:InvokeFunction",
-        function_name: lambdaName,
-        principal: "apigateway.amazonaws.com",
-        source_arn: `\${aws_apigatewayv2_api.${resourceName}.execution_arn}/*/*`,
-      }];
-    })),
+        return [
+          routeName,
+          {
+            statement_id: `${routeName}_allow_apigateway`,
+            action: "lambda:InvokeFunction",
+            function_name: lambdaName,
+            principal: "apigateway.amazonaws.com",
+            source_arn: `\${aws_apigatewayv2_api.${resourceName}.execution_arn}/*/*`,
+          },
+        ];
+      }),
+    ),
   };
 }
 
@@ -285,23 +314,27 @@ function apiGatewayDomainResources(
     return { resource: {} };
   }
 
-  const certificateArn = certificateArnForDomain(domain.certificate, resourceName)
-    ?? options.domainCertificateArns?.[domain.name];
+  const certificateArn =
+    certificateArnForDomain(domain.certificate, resourceName) ??
+    options.domainCertificateArns?.[domain.name];
   if (!certificateArn) {
-    throw new Error(`domain.${target}.certificate is required for API Gateway domain ${domain.name}`);
+    throw new Error(
+      `domain.${target}.certificate is required for API Gateway domain ${domain.name}`,
+    );
   }
 
-  const certificateData = domain.certificate && "lookupDomain" in domain.certificate
-    ? {
-        aws_acm_certificate: {
-          [resourceName]: {
-            domain: domain.certificate.lookupDomain,
-            statuses: ["ISSUED"],
-            most_recent: true,
+  const certificateData =
+    domain.certificate && "lookupDomain" in domain.certificate
+      ? {
+          aws_acm_certificate: {
+            [resourceName]: {
+              domain: domain.certificate.lookupDomain,
+              statuses: ["ISSUED"],
+              most_recent: true,
+            },
           },
-        },
-      }
-    : {};
+        }
+      : {};
 
   const domainConfig: Record<string, unknown> = {
     endpoint_type: "REGIONAL",
@@ -350,7 +383,10 @@ function apiGatewayDomainResources(
   };
 }
 
-function certificateArnForDomain(certificate: { arn: string } | { lookupDomain: string } | undefined, resourceName: string): string | undefined {
+function certificateArnForDomain(
+  certificate: { arn: string } | { lookupDomain: string } | undefined,
+  resourceName: string,
+): string | undefined {
   if (!certificate) {
     return undefined;
   }
@@ -362,16 +398,11 @@ function certificateArnForDomain(certificate: { arn: string } | { lookupDomain: 
   return `\${data.aws_acm_certificate.${resourceName}.arn}`;
 }
 
-function isApiGatewayLambdaRoute(
-  route: ApiGatewayRoute,
-): route is ApiGatewayLambdaRoute {
+function isApiGatewayLambdaRoute(route: ApiGatewayRoute): route is ApiGatewayLambdaRoute {
   return route.target.type === "lambda";
 }
 
-function apiGatewayIntegrationUri(
-  route: ApiGatewayRoute,
-  options: TerraformOptions,
-): string {
+function apiGatewayIntegrationUri(route: ApiGatewayRoute, options: TerraformOptions): string {
   if (route.target.type === "http_proxy") {
     return route.target.uri;
   }
@@ -392,21 +423,19 @@ function lambdaNameForService(serviceName: string, options: TerraformOptions): s
   throw new Error(`apigateway route references unknown Lambda service ${serviceName}`);
 }
 
-function apiGatewayRouteName(
-  resourceName: string,
-  route: ApiGatewayRoute,
-): string {
-  const pathName = route.path === "/{proxy+}"
-    ? "proxy"
-    : route.path.replace(/^\//, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+function apiGatewayRouteName(resourceName: string, route: ApiGatewayRoute): string {
+  const pathName =
+    route.path === "/{proxy+}"
+      ? "proxy"
+      : route.path
+          .replace(/^\//, "")
+          .replace(/[^a-zA-Z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "");
 
   return terraformName(`${resourceName}_${route.target.type}_${pathName || "root"}`);
 }
 
-function tableNameForService(
-  serviceName: string,
-  options: TerraformOptions,
-): string {
+function tableNameForService(serviceName: string, options: TerraformOptions): string {
   const configuredName = options.serviceNames?.[serviceName];
   if (configuredName) {
     return configuredName;
@@ -443,7 +472,12 @@ function terraformForDynamoDb(
   });
 }
 
-function baseTerraform(metadata: ServiceMetadata, options: TerraformOptions, resource: Record<string, unknown>, data?: Record<string, unknown>): TerraformJson {
+function baseTerraform(
+  metadata: ServiceMetadata,
+  options: TerraformOptions,
+  resource: Record<string, unknown>,
+  data?: Record<string, unknown>,
+): TerraformJson {
   return {
     terraform: {
       required_version: ">= 1.15.6",
@@ -513,7 +547,14 @@ function tagsFor(metadata: ServiceMetadata): Record<string, string> {
 }
 
 function physicalName(metadata: ServiceMetadata, suffix?: string): string {
-  return [metadata.env, metadata.venture, metadata.vpc, metadata.securityZone, metadata.serviceName, suffix]
+  return [
+    metadata.env,
+    metadata.venture,
+    metadata.vpc,
+    metadata.securityZone,
+    metadata.serviceName,
+    suffix,
+  ]
     .filter(Boolean)
     .join("-");
 }

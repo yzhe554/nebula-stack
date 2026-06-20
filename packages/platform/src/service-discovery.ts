@@ -5,8 +5,6 @@ import { validateServiceNetworkZones } from "./network-zones";
 import { apiGatewaySchema, dynamoDbSchema, lambdaSchema } from "./schemas";
 import type { LoadedService, ServiceMetadata, ServiceType } from "./types";
 
-const supportedServiceTypes = new Set<ServiceType>(["lambda", "dynamodb", "apigateway"]);
-
 export type DiscoverOptions = {
   env: string;
   venture?: string;
@@ -23,9 +21,10 @@ export async function discoverServices(options: DiscoverOptions): Promise<Loaded
   const files = await listYamlFiles(envRoot);
   const selected = new Set(options.services ?? []);
   const loaded = await Promise.all(files.map((filePath) => loadService(filePath, servicesRoot)));
-  const filtered = selected.size === 0
-    ? loaded
-    : loaded.filter((service) => selected.has(service.metadata.serviceName));
+  const filtered =
+    selected.size === 0
+      ? loaded
+      : loaded.filter((service) => selected.has(service.metadata.serviceName));
 
   if (selected.size > 0) {
     const found = new Set(filtered.map((service) => service.metadata.serviceName));
@@ -38,26 +37,37 @@ export async function discoverServices(options: DiscoverOptions): Promise<Loaded
   }
 
   assertUniqueServiceNames(filtered, options.env, options.venture);
-  await validateServiceNetworkZones(filtered.map((service) => service.metadata), servicesRoot);
+  await validateServiceNetworkZones(
+    filtered.map((service) => service.metadata),
+    servicesRoot,
+  );
 
-  return filtered.sort((left, right) => left.metadata.serviceName.localeCompare(right.metadata.serviceName));
+  return filtered.sort((left, right) =>
+    left.metadata.serviceName.localeCompare(right.metadata.serviceName),
+  );
 }
 
 async function listYamlFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
-  const nested = await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(directory, entry.name);
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
 
-    if (entry.isDirectory()) {
-      return listYamlFiles(entryPath);
-    }
+      if (entry.isDirectory()) {
+        return listYamlFiles(entryPath);
+      }
 
-    if (entry.isFile() && entry.name !== "network.yaml" && (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))) {
-      return [entryPath];
-    }
+      if (
+        entry.isFile() &&
+        entry.name !== "network.yaml" &&
+        (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))
+      ) {
+        return [entryPath];
+      }
 
-    return [];
-  }));
+      return [];
+    }),
+  );
 
   return nested.flat();
 }
@@ -91,7 +101,9 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
   const parts = relative.split(path.sep);
 
   if (parts.length !== 5) {
-    throw new Error(`Service file must match infra/services/<env>/<venture>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml: ${filePath}`);
+    throw new Error(
+      `Service file must match infra/services/<env>/<venture>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml: ${filePath}`,
+    );
   }
 
   const [env, venture, vpc, securityZone, fileName] = parts;
@@ -101,11 +113,8 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
     throw new Error(`Unsupported service file name: ${filePath}`);
   }
 
-  const [, serviceName, serviceType] = match;
-
-  if (!supportedServiceTypes.has(serviceType as ServiceType)) {
-    throw new Error(`Unsupported service type in ${filePath}: ${serviceType}`);
-  }
+  const [, serviceName, serviceTypeValue] = match;
+  const serviceType = parseServiceType(serviceTypeValue, filePath);
 
   return {
     env,
@@ -113,9 +122,17 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
     vpc,
     securityZone,
     serviceName,
-    serviceType: serviceType as ServiceType,
+    serviceType,
     sourcePath: filePath,
   };
+}
+
+function parseServiceType(value: string, filePath: string): ServiceType {
+  if (value === "lambda" || value === "dynamodb" || value === "apigateway") {
+    return value;
+  }
+
+  throw new Error(`Unsupported service type in ${filePath}: ${value}`);
 }
 
 function assertUniqueServiceNames(services: LoadedService[], env: string, venture?: string): void {
@@ -126,7 +143,9 @@ function assertUniqueServiceNames(services: LoadedService[], env: string, ventur
     const previous = seen.get(service.metadata.serviceName);
 
     if (previous) {
-      throw new Error(`Duplicate service name in ${scope}: ${service.metadata.serviceName} (${previous}, ${service.metadata.sourcePath})`);
+      throw new Error(
+        `Duplicate service name in ${scope}: ${service.metadata.serviceName} (${previous}, ${service.metadata.sourcePath})`,
+      );
     }
 
     seen.set(service.metadata.serviceName, service.metadata.sourcePath);

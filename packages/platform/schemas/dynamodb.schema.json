@@ -15,17 +15,10 @@
         },
         "type": {
           "type": "string",
-          "enum": [
-            "S",
-            "N",
-            "B"
-          ]
+          "enum": ["S", "N", "B"]
         }
       },
-      "required": [
-        "name",
-        "type"
-      ],
+      "required": ["name", "type"],
       "additionalProperties": false
     },
     "rangeKey": {
@@ -37,28 +30,17 @@
         },
         "type": {
           "type": "string",
-          "enum": [
-            "S",
-            "N",
-            "B"
-          ]
+          "enum": ["S", "N", "B"]
         }
       },
-      "required": [
-        "name",
-        "type"
-      ],
+      "required": ["name", "type"],
       "additionalProperties": false
     },
     "pointInTimeRecovery": {
       "type": "boolean"
     }
   },
-  "required": [
-    "billingMode",
-    "hashKey",
-    "pointInTimeRecovery"
-  ],
+  "required": ["billingMode", "hashKey", "pointInTimeRecovery"],
   "additionalProperties": false,
   "$id": "https://example.local/packages/platform/schemas/dynamodb.schema.json",
   "title": "Platform DynamoDB Service",

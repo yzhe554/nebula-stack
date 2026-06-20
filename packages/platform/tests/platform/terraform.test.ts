@@ -1,19 +1,81 @@
 import { describe, expect, test } from "vitest";
 import { generatedDirectoryForService } from "../../src/generated-paths";
-import { terraformForService } from "../../src/terraform";
+import { terraformForService, type TerraformJson } from "../../src/terraform";
 import type { LoadedService } from "../../src/types";
+
+type TerraformObject = Record<string, unknown>;
+type TerraformResult = TerraformJson & {
+  data: TerraformObject;
+  provider: { aws: TerraformObject };
+  resource: TerraformObject;
+};
+
+function terraformResult(terraform: TerraformJson): TerraformResult {
+  const provider = objectProperty(terraform, "provider");
+  const resources = objectProperty(terraform, "resource");
+
+  return {
+    ...terraform,
+    data: objectProperty(terraform, "data", true),
+    provider: { aws: objectProperty(provider, "aws") },
+    resource: resources,
+  };
+}
+
+function resource(terraform: TerraformResult, type: string, name: string): TerraformObject {
+  return objectProperty(objectProperty(terraform.resource, type), name);
+}
+
+function data(terraform: TerraformResult, type: string, name: string): TerraformObject {
+  return objectProperty(objectProperty(terraform.data, type), name);
+}
+
+function objectProperty(
+  object: TerraformObject,
+  property: string,
+  optional = false,
+): TerraformObject {
+  const value = object[property];
+
+  if (optional && value === undefined) {
+    return {};
+  }
+
+  expect(value).toBeTypeOf("object");
+  expect(value).not.toBeNull();
+  if (!isTerraformObject(value)) {
+    throw new TypeError(`Expected ${property} to be an object`);
+  }
+
+  return value;
+}
+
+function isTerraformObject(value: unknown): value is TerraformObject {
+  return typeof value === "object" && value !== null;
+}
+
+function stringProperty(object: TerraformObject, property: string): string {
+  const value = object[property];
+  expect(value).toBeTypeOf("string");
+  return String(value);
+}
 
 describe("terraformForService", () => {
   test("generates Terraform beside the source service folder", () => {
-    expect(generatedDirectoryForService({
-      env: "dev",
-      venture: "venture",
-      vpc: "core",
-      securityZone: "internal",
-      serviceName: "payment-api",
-      serviceType: "lambda",
-      sourcePath: "infra/services/dev/venture/core/internal/payment-api.lambda.yaml",
-    }, "floci")).toBe("infra/services/dev/venture/core/internal/__generated__/floci/payment-api");
+    expect(
+      generatedDirectoryForService(
+        {
+          env: "dev",
+          venture: "venture",
+          vpc: "core",
+          securityZone: "internal",
+          serviceName: "payment-api",
+          serviceType: "lambda",
+          sourcePath: "infra/services/dev/venture/core/internal/payment-api.lambda.yaml",
+        },
+        "floci",
+      ),
+    ).toBe("infra/services/dev/venture/core/internal/__generated__/floci/payment-api");
   });
 
   test("generates protected DynamoDB Terraform JSON", () => {
@@ -34,8 +96,8 @@ describe("terraformForService", () => {
       },
     };
 
-    const terraform = terraformForService(service, { target: "aws" }) as any;
-    const table = terraform.resource.aws_dynamodb_table.customer_records;
+    const terraform = terraformResult(terraformForService(service, { target: "aws" }));
+    const table = resource(terraform, "aws_dynamodb_table", "customer_records");
 
     expect(table).toMatchObject({
       name: "dev-venture-core-managed-customer-records",
@@ -84,15 +146,17 @@ describe("terraformForService", () => {
       },
     };
 
-    const terraform = terraformForService(service, {
-      target: "aws",
-      moduleDirectory: "infra/services/dev/venture/core/internal/__generated__/aws/payment-api",
-      serviceNames: {
-        "customer-records": "dev-venture-core-managed-customer-records",
-      },
-    }) as any;
-    const fn = terraform.resource.aws_lambda_function.payment_api;
-    const logGroup = terraform.resource.aws_cloudwatch_log_group.payment_api;
+    const terraform = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        moduleDirectory: "infra/services/dev/venture/core/internal/__generated__/aws/payment-api",
+        serviceNames: {
+          "customer-records": "dev-venture-core-managed-customer-records",
+        },
+      }),
+    );
+    const fn = resource(terraform, "aws_lambda_function", "payment_api");
+    const logGroup = resource(terraform, "aws_cloudwatch_log_group", "payment_api");
 
     expect(fn).toMatchObject({
       function_name: "dev-venture-core-internal-payment-api",
@@ -107,20 +171,23 @@ describe("terraformForService", () => {
       },
     });
     expect(fn.filename).toBe("../../../../../../../../../apps/payment-api/dist/payment-api.zip");
-    expect(fn.source_code_hash).toBe('${filebase64sha256("../../../../../../../../../apps/payment-api/dist/payment-api.zip")}');
+    expect(fn.source_code_hash).toBe(
+      '${filebase64sha256("../../../../../../../../../apps/payment-api/dist/payment-api.zip")}',
+    );
     expect(logGroup).toMatchObject({
       name: "/aws/lambda/dev-venture-core-internal-payment-api",
       retention_in_days: 7,
     });
-    const policy = terraform.resource.aws_iam_role_policy.payment_api_dynamodb_access;
+    const policy = resource(terraform, "aws_iam_role_policy", "payment_api_dynamodb_access");
     expect(policy.role).toBe("${aws_iam_role.payment_api_lambda_role.id}");
-    expect(JSON.parse(policy.policy)).toEqual({
+    expect(JSON.parse(stringProperty(policy, "policy"))).toEqual({
       Version: "2012-10-17",
       Statement: [
         {
           Effect: "Allow",
           Action: ["dynamodb:PutItem", "dynamodb:GetItem"],
-          Resource: "arn:aws:dynamodb:ap-southeast-2:*:table/dev-venture-core-managed-customer-records",
+          Resource:
+            "arn:aws:dynamodb:ap-southeast-2:*:table/dev-venture-core-managed-customer-records",
         },
       ],
     });
@@ -161,7 +228,7 @@ describe("terraformForService", () => {
     );
   });
 
-  test("generates Floci provider endpoints for local AWS emulation", () => {
+  test("generates Floci provider endpoints", () => {
     const service: LoadedService = {
       metadata: {
         env: "dev",
@@ -179,7 +246,7 @@ describe("terraformForService", () => {
       },
     };
 
-    const terraform = terraformForService(service, { target: "floci" }) as any;
+    const terraform = terraformResult(terraformForService(service, { target: "floci" }));
 
     expect(terraform.provider.aws).toMatchObject({
       region: "us-east-1",
@@ -196,6 +263,7 @@ describe("terraformForService", () => {
         iam: "http://localhost:4566",
         lambda: "http://localhost:4566",
         logs: "http://localhost:4566",
+        route53: "http://localhost:4566",
         s3: "http://localhost:4566",
         sts: "http://localhost:4566",
       },
@@ -248,43 +316,58 @@ describe("terraformForService", () => {
       },
     };
 
-    const terraform = terraformForService(service, {
-      target: "floci",
-      serviceNames: {
-        "payment-api": "dev-venture-core-internal-payment-api",
-      },
-    }) as any;
+    const terraform = terraformResult(
+      terraformForService(service, {
+        target: "floci",
+        serviceNames: {
+          "payment-api": "dev-venture-core-internal-payment-api",
+        },
+      }),
+    );
 
-    expect(terraform.resource.aws_apigatewayv2_api.docs).toMatchObject({
+    expect(resource(terraform, "aws_apigatewayv2_api", "docs")).toMatchObject({
       name: "dev-venture-core-public-docs",
       protocol_type: "HTTP",
     });
-    expect(terraform.resource.aws_apigatewayv2_stage.docs_default.lifecycle).toEqual({
+    expect(resource(terraform, "aws_apigatewayv2_stage", "docs_default").lifecycle).toEqual({
       ignore_changes: ["tags", "tags_all"],
     });
-    expect(terraform.resource.aws_apigatewayv2_stage.docs_default.tags).toBeUndefined();
-    expect(terraform.resource.aws_apigatewayv2_integration.docs_http_proxy_docs_proxy).toMatchObject({
+    expect(resource(terraform, "aws_apigatewayv2_stage", "docs_default").tags).toBeUndefined();
+    expect(
+      resource(terraform, "aws_apigatewayv2_integration", "docs_http_proxy_docs_proxy"),
+    ).toMatchObject({
       api_id: "${aws_apigatewayv2_api.docs.id}",
       integration_type: "HTTP_PROXY",
       integration_uri: "http://host.docker.internal:3001/docs/{proxy}",
       integration_method: "ANY",
     });
-    expect(terraform.resource.aws_apigatewayv2_integration.docs_http_proxy_docs).toMatchObject({
+    expect(
+      resource(terraform, "aws_apigatewayv2_integration", "docs_http_proxy_docs"),
+    ).toMatchObject({
       api_id: "${aws_apigatewayv2_api.docs.id}",
       integration_type: "HTTP_PROXY",
       integration_uri: "http://host.docker.internal:3001/docs",
       integration_method: "ANY",
     });
-    expect(terraform.resource.aws_apigatewayv2_integration.docs_lambda_api_payments).toMatchObject({
+    expect(
+      resource(terraform, "aws_apigatewayv2_integration", "docs_lambda_api_payments"),
+    ).toMatchObject({
       api_id: "${aws_apigatewayv2_api.docs.id}",
       integration_type: "AWS_PROXY",
-      integration_uri: "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:*:function:dev-venture-core-internal-payment-api/invocations",
+      integration_uri:
+        "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:*:function:dev-venture-core-internal-payment-api/invocations",
       payload_format_version: "2.0",
     });
-    expect(terraform.resource.aws_apigatewayv2_route.docs_http_proxy_docs_proxy.route_key).toBe("ANY /docs/{proxy+}");
-    expect(terraform.resource.aws_apigatewayv2_route.docs_http_proxy_docs.route_key).toBe("ANY /docs");
-    expect(terraform.resource.aws_apigatewayv2_route.docs_lambda_api_payments.route_key).toBe("POST /api/payments");
-    expect(terraform.resource.aws_lambda_permission.docs_lambda_api_payments).toMatchObject({
+    expect(
+      resource(terraform, "aws_apigatewayv2_route", "docs_http_proxy_docs_proxy").route_key,
+    ).toBe("ANY /docs/{proxy+}");
+    expect(resource(terraform, "aws_apigatewayv2_route", "docs_http_proxy_docs").route_key).toBe(
+      "ANY /docs",
+    );
+    expect(
+      resource(terraform, "aws_apigatewayv2_route", "docs_lambda_api_payments").route_key,
+    ).toBe("POST /api/payments");
+    expect(resource(terraform, "aws_lambda_permission", "docs_lambda_api_payments")).toMatchObject({
       action: "lambda:InvokeFunction",
       function_name: "dev-venture-core-internal-payment-api",
       principal: "apigateway.amazonaws.com",
@@ -292,42 +375,51 @@ describe("terraformForService", () => {
     });
     expect(terraform.resource.aws_apigatewayv2_domain_name).toBeUndefined();
     expect(terraform.resource.aws_apigatewayv2_api_mapping).toBeUndefined();
-    expect(terraform.data).toBeUndefined();
+    expect(terraform.data).toEqual({});
     expect(terraform.resource.aws_route53_zone).toBeUndefined();
     expect(terraform.resource.aws_route53_record).toBeUndefined();
 
-    const awsTerraform = terraformForService(service, {
-      target: "aws",
-      serviceNames: {
-        "payment-api": "dev-venture-core-internal-payment-api",
-      },
-    }) as any;
+    const awsTerraform = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: {
+          "payment-api": "dev-venture-core-internal-payment-api",
+        },
+      }),
+    );
 
-    expect(awsTerraform.resource.aws_apigatewayv2_stage.docs_default.lifecycle).toBeUndefined();
-    expect(awsTerraform.resource.aws_apigatewayv2_stage.docs_default.tags).toMatchObject({
+    expect(
+      resource(awsTerraform, "aws_apigatewayv2_stage", "docs_default").lifecycle,
+    ).toBeUndefined();
+    expect(resource(awsTerraform, "aws_apigatewayv2_stage", "docs_default").tags).toMatchObject({
       Environment: "dev",
       ServiceName: "docs",
       ServiceType: "apigateway",
     });
-    expect(awsTerraform.data.aws_route53_zone.docs).toEqual({
+    expect(data(awsTerraform, "aws_route53_zone", "docs")).toEqual({
       name: "dev.example.com",
       private_zone: false,
     });
-    expect(awsTerraform.data.aws_acm_certificate.docs).toEqual({
+    expect(data(awsTerraform, "aws_acm_certificate", "docs")).toEqual({
       domain: "*.dev.example.com",
       statuses: ["ISSUED"],
       most_recent: true,
     });
     expect(awsTerraform.resource.aws_route53_zone).toBeUndefined();
-    expect(awsTerraform.resource.aws_route53_record.docs.name).toBe("app.dev.example.com");
-    expect(awsTerraform.resource.aws_apigatewayv2_domain_name.docs.domain_name).toBe("app.dev.example.com");
-    expect(awsTerraform.resource.aws_apigatewayv2_domain_name.docs.domain_name_configuration.certificate_arn).toBe(
-      "${data.aws_acm_certificate.docs.arn}",
+    expect(resource(awsTerraform, "aws_route53_record", "docs").name).toBe("app.dev.example.com");
+    expect(resource(awsTerraform, "aws_apigatewayv2_domain_name", "docs").domain_name).toBe(
+      "app.dev.example.com",
     );
+    expect(
+      objectProperty(
+        resource(awsTerraform, "aws_apigatewayv2_domain_name", "docs"),
+        "domain_name_configuration",
+      ).certificate_arn,
+    ).toBe("${data.aws_acm_certificate.docs.arn}");
   });
 
   test("requires an AWS API Gateway domain certificate config", () => {
-    const service: LoadedService = {
+    const service = {
       metadata: {
         env: "dev",
         venture: "venture",
@@ -356,14 +448,16 @@ describe("terraformForService", () => {
           },
         ],
       },
-    } as unknown as LoadedService;
+    } satisfies LoadedService;
 
-    expect(() => terraformForService(service, {
-      target: "aws",
-      serviceNames: {
-        "payment-api": "dev-venture-core-internal-payment-api",
-      },
-    })).toThrow("domain.aws.certificate is required for API Gateway domain app.dev.example.com");
+    expect(() =>
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: {
+          "payment-api": "dev-venture-core-internal-payment-api",
+        },
+      }),
+    ).toThrow("domain.aws.certificate is required for API Gateway domain app.dev.example.com");
   });
 
   test("supports explicit AWS API Gateway certificate ARNs", () => {
@@ -397,12 +491,15 @@ describe("terraformForService", () => {
       },
     };
 
-    const terraform = terraformForService(service, { target: "aws" }) as any;
+    const terraform = terraformResult(terraformForService(service, { target: "aws" }));
 
     expect(terraform.data.aws_acm_certificate).toBeUndefined();
-    expect(terraform.resource.aws_apigatewayv2_domain_name.docs.domain_name_configuration.certificate_arn).toBe(
-      "arn:aws:acm:ap-southeast-2:123456789012:certificate/example",
-    );
+    expect(
+      objectProperty(
+        resource(terraform, "aws_apigatewayv2_domain_name", "docs"),
+        "domain_name_configuration",
+      ).certificate_arn,
+    ).toBe("arn:aws:acm:ap-southeast-2:123456789012:certificate/example");
   });
 
   test("injects local AWS endpoint URL for Floci Lambda deployments", () => {
@@ -435,14 +532,18 @@ describe("terraformForService", () => {
       },
     };
 
-    const terraform = terraformForService(service, {
-      target: "floci",
-      serviceNames: {
-        "customer-records": "dev-venture-core-managed-customer-records",
-      },
-    }) as any;
+    const terraform = terraformResult(
+      terraformForService(service, {
+        target: "floci",
+        serviceNames: {
+          "customer-records": "dev-venture-core-managed-customer-records",
+        },
+      }),
+    );
 
-    expect(terraform.resource.aws_lambda_function.payment_api.environment.variables).toEqual({
+    const lambda = resource(terraform, "aws_lambda_function", "payment_api");
+    const environment = objectProperty(lambda, "environment");
+    expect(environment.variables).toEqual({
       TABLE_NAME: "dev-venture-core-managed-customer-records",
       AWS_ENDPOINT_URL: "http://localhost.floci.io:4566",
     });

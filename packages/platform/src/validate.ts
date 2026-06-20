@@ -41,7 +41,11 @@ export async function validateConfigs(options: ValidateConfigsOptions): Promise<
   }
 
   try {
-    const services = await discoverServices({ env: options.env, venture: options.venture, servicesRoot });
+    const services = await discoverServices({
+      env: options.env,
+      venture: options.venture,
+      servicesRoot,
+    });
     validateServiceReferences(services);
   } catch (error) {
     errors.push({ file: normalizePath(scopeRoot), messages: messagesForError(error) });
@@ -54,7 +58,9 @@ export async function validateConfigs(options: ValidateConfigsOptions): Promise<
   };
 }
 
-export function validateServiceReferences(services: Awaited<ReturnType<typeof discoverServices>>): void {
+export function validateServiceReferences(
+  services: Awaited<ReturnType<typeof discoverServices>>,
+): void {
   const dynamoDbServices = new Set(
     services
       .filter((service) => service.metadata.serviceType === "dynamodb")
@@ -68,20 +74,28 @@ export function validateServiceReferences(services: Awaited<ReturnType<typeof di
 
     service.config.permissions.dynamodb.forEach((permission, index) => {
       if (!dynamoDbServices.has(permission.service)) {
-        throw new Error(`permissions.dynamodb[${index}].service references unknown DynamoDB service ${permission.service} (${service.metadata.sourcePath})`);
+        throw new Error(
+          `permissions.dynamodb[${index}].service references unknown DynamoDB service ${permission.service} (${service.metadata.sourcePath})`,
+        );
       }
     });
   }
 }
 
-function isLambdaService(service: LoadedService): service is Extract<LoadedService, { metadata: { serviceType: "lambda" } }> {
+function isLambdaService(
+  service: LoadedService,
+): service is Extract<LoadedService, { metadata: { serviceType: "lambda" } }> {
   return service.metadata.serviceType === "lambda";
 }
 
-export async function validateAllConfigs(options: { servicesRoot?: string } = {}): Promise<ValidationResult> {
+export async function validateAllConfigs(
+  options: { servicesRoot?: string } = {},
+): Promise<ValidationResult> {
   const servicesRoot = options.servicesRoot ?? path.join(repoRoot(), "infra/services");
   const scopes = await discoverScopes(servicesRoot);
-  const results = await Promise.all(scopes.map(({ env, venture }) => validateConfigs({ env, venture, servicesRoot })));
+  const results = await Promise.all(
+    scopes.map(({ env, venture }) => validateConfigs({ env, venture, servicesRoot })),
+  );
 
   return {
     valid: results.every((result) => result.valid),
@@ -91,7 +105,9 @@ export async function validateAllConfigs(options: { servicesRoot?: string } = {}
   };
 }
 
-async function discoverScopes(servicesRoot: string): Promise<Array<{ env: string; venture: string }>> {
+async function discoverScopes(
+  servicesRoot: string,
+): Promise<Array<{ env: string; venture: string }>> {
   const envEntries = await readdir(servicesRoot, { withFileTypes: true });
   const scopes: Array<{ env: string; venture: string }> = [];
 
@@ -110,7 +126,9 @@ async function discoverScopes(servicesRoot: string): Promise<Array<{ env: string
     }
   }
 
-  return scopes.sort((left, right) => `${left.env}/${left.venture}`.localeCompare(`${right.env}/${right.venture}`));
+  return scopes.sort((left, right) =>
+    `${left.env}/${left.venture}`.localeCompare(`${right.env}/${right.venture}`),
+  );
 }
 
 async function validateYamlFile(filePath: string, servicesRoot: string): Promise<void> {
@@ -120,7 +138,9 @@ async function validateYamlFile(filePath: string, servicesRoot: string): Promise
   if (fileName === "network.yaml") {
     const parts = path.relative(servicesRoot, filePath).split(path.sep);
     if (parts.length !== 4) {
-      throw new Error("network.yaml must be located at infra/services/<env>/<venture>/<vpc>/network.yaml");
+      throw new Error(
+        "network.yaml must be located at infra/services/<env>/<venture>/<vpc>/network.yaml",
+      );
     }
 
     const [env, venture, vpc] = parts;
@@ -148,19 +168,21 @@ async function validateYamlFile(filePath: string, servicesRoot: string): Promise
 
 async function listYamlFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
-  const nested = await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(directory, entry.name);
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
 
-    if (entry.isDirectory()) {
-      return listYamlFiles(entryPath);
-    }
+      if (entry.isDirectory()) {
+        return listYamlFiles(entryPath);
+      }
 
-    if (entry.isFile() && (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))) {
-      return [entryPath];
-    }
+      if (entry.isFile() && (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))) {
+        return [entryPath];
+      }
 
-    return [];
-  }));
+      return [];
+    }),
+  );
 
   return nested.flat();
 }
@@ -200,9 +222,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const result = env && venture
-    ? await validateConfigs({ env, venture })
-    : await validateAllConfigs();
+  const result =
+    env && venture ? await validateConfigs({ env, venture }) : await validateAllConfigs();
 
   for (const file of result.files) {
     const fileErrors = result.errors.filter((error) => error.file === file);
@@ -228,20 +249,26 @@ async function main(): Promise<void> {
   }
 
   if (!result.valid) {
-    console.error(env && venture ? `Validation failed for ${env}/${venture}.` : "Validation failed.");
+    console.error(
+      env && venture ? `Validation failed for ${env}/${venture}.` : "Validation failed.",
+    );
     process.exit(1);
   }
 
-  console.log(env && venture
-    ? `Validated ${result.files.length} config files for ${env}/${venture}.`
-    : `Validated ${result.files.length} config files across ${result.scopes?.length ?? 0} scopes.`);
+  console.log(
+    env && venture
+      ? `Validated ${result.files.length} config files for ${env}/${venture}.`
+      : `Validated ${result.files.length} config files across ${result.scopes?.length ?? 0} scopes.`,
+  );
 }
 
 function repoRoot(): string {
   return path.resolve(import.meta.dirname, "../../..");
 }
 
-const isCliEntry = process.argv[1] ? fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) : false;
+const isCliEntry = process.argv[1]
+  ? fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+  : false;
 
 if (isCliEntry) {
   await main();

@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "tabWidth": 2,
+  "useTabs": false,
+  "ignorePatterns": [
+    "**/.next/**",
+    "**/__generated__/**",
+    "**/dist/**",
+    "**/dist-ts/**",
+    "**/node_modules/**",
+    "docs/superpowers/**",
+    "pnpm-lock.yaml"
+  ]
+}

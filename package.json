@@ -1,8 +1,7 @@
 {
-  "name": "learn-terraform-get-started-aws",
+  "name": "nebula-stack",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "setup:local": "./scripts/setup-local.sh",
     "build": "turbo build",
@@ -10,6 +9,11 @@
     "docs:dev:floci": "./scripts/docs-dev-floci.sh",
     "docs:build": "pnpm --filter @repo/docs run build",
     "docs:reset": "pnpm --filter @repo/docs run reset",
+    "lint": "oxlint --type-aware --type-check --deny-warnings .",
+    "lint:fix": "oxlint --type-aware --type-check --deny-warnings --fix .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "prepare": "lefthook install",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
     "app:payment-api:package": "pnpm --filter @repo/payment-api run package",
@@ -38,11 +42,16 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
+    "lefthook": "^2.1.9",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
+    "oxlint-tsgolint": "^0.23.0",
     "rolldown": "^1.1.2",
     "tsx": "^4.22.4",
     "turbo": "latest",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
-  }
+  },
+  "packageManager": "pnpm@10.33.0"
 }

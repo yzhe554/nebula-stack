@@ -25,7 +25,14 @@ export type LambdaConfig = {
 
 export type DynamoDbPermission = {
   service: string;
-  actions: Array<"dynamodb:PutItem" | "dynamodb:GetItem" | "dynamodb:UpdateItem" | "dynamodb:DeleteItem" | "dynamodb:Query" | "dynamodb:Scan">;
+  actions: Array<
+    | "dynamodb:PutItem"
+    | "dynamodb:GetItem"
+    | "dynamodb:UpdateItem"
+    | "dynamodb:DeleteItem"
+    | "dynamodb:Query"
+    | "dynamodb:Scan"
+  >;
 };
 
 export type DynamoDbAttributeType = "S" | "N" | "B";
@@ -60,16 +67,12 @@ export type ApiGatewayTargetDomain = {
   certificate?: ApiGatewayCertificate;
 };
 
-export type ApiGatewayCertificate =
-  | { arn: string }
-  | { lookupDomain: string };
+export type ApiGatewayCertificate = { arn: string } | { lookupDomain: string };
 
 export type ApiGatewayRoute = {
   path: string;
   method: "ANY" | "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
-  target:
-    | { type: "http_proxy"; uri: string }
-    | { type: "lambda"; service: string };
+  target: { type: "http_proxy"; uri: string } | { type: "lambda"; service: string };
 };
 
 export type LoadedService =

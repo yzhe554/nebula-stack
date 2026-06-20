@@ -13,8 +13,17 @@ if (!args.env) {
   throw new Error("Missing required --env <env> argument");
 }
 
-const services = await discoverServices({ env: args.env, venture: args.venture, services: args.services, servicesRoot });
-const scopedServices = await discoverServices({ env: args.env, venture: args.venture, servicesRoot });
+const services = await discoverServices({
+  env: args.env,
+  venture: args.venture,
+  services: args.services,
+  servicesRoot,
+});
+const scopedServices = await discoverServices({
+  env: args.env,
+  venture: args.venture,
+  servicesRoot,
+});
 validateServiceReferences(scopedServices);
 const serviceNames = serviceNamesFor(scopedServices);
 const target = args.target ?? "aws";
@@ -27,22 +36,46 @@ for (const service of services) {
     `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames }), null, 2)}\n`,
     "utf8",
   );
-  console.log(`Generated ${path.relative(repoRoot, outputDirectory)}/main.tf.json from ${path.relative(repoRoot, service.metadata.sourcePath)}`);
+  console.log(
+    `Generated ${path.relative(repoRoot, outputDirectory)}/main.tf.json from ${path.relative(repoRoot, service.metadata.sourcePath)}`,
+  );
 }
 
-function serviceNamesFor(services: Awaited<ReturnType<typeof discoverServices>>): Record<string, string> {
+function serviceNamesFor(
+  loadedServices: Awaited<ReturnType<typeof discoverServices>>,
+): Record<string, string> {
   return Object.fromEntries(
-    services
-      .filter((service) => service.metadata.serviceType === "dynamodb" || service.metadata.serviceType === "lambda")
+    loadedServices
+      .filter(
+        (service) =>
+          service.metadata.serviceType === "dynamodb" || service.metadata.serviceType === "lambda",
+      )
       .map((service) => [service.metadata.serviceName, physicalName(service.metadata)]),
   );
 }
 
-function physicalName(metadata: { env: string; venture: string; vpc: string; securityZone: string; serviceName: string }): string {
-  return [metadata.env, metadata.venture, metadata.vpc, metadata.securityZone, metadata.serviceName].join("-");
+function physicalName(metadata: {
+  env: string;
+  venture: string;
+  vpc: string;
+  securityZone: string;
+  serviceName: string;
+}): string {
+  return [
+    metadata.env,
+    metadata.venture,
+    metadata.vpc,
+    metadata.securityZone,
+    metadata.serviceName,
+  ].join("-");
 }
 
-function parseArgs(argv: string[]): { env?: string; venture?: string; target?: DeployTarget; services?: string[] } {
+function parseArgs(argv: string[]): {
+  env?: string;
+  venture?: string;
+  target?: DeployTarget;
+  services?: string[];
+} {
   const parsed: { env?: string; venture?: string; target?: DeployTarget; services?: string[] } = {};
 
   for (let index = 0; index < argv.length; index += 1) {

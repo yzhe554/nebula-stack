@@ -13,7 +13,13 @@ export type LoadNetworkPolicyOptions = {
 
 export async function loadNetworkPolicy(options: LoadNetworkPolicyOptions): Promise<NetworkPolicy> {
   const servicesRoot = options.servicesRoot ?? "infra/services";
-  const policyPath = path.join(servicesRoot, options.env, options.venture, options.vpc, "network.yaml");
+  const policyPath = path.join(
+    servicesRoot,
+    options.env,
+    options.venture,
+    options.vpc,
+    "network.yaml",
+  );
   const raw = parse(await readFile(policyPath, "utf8"));
 
   return networkPolicySchema.parse(raw);
@@ -61,7 +67,11 @@ export async function validateServiceNetworkZones(
 function validateDynamoDbEndpoint(service: ServiceMetadata, policy: NetworkPolicy): void {
   const endpoint = policy.awsEndpoints.dynamodb;
 
-  if (endpoint?.type === "gateway" && endpoint.policy === "default" && endpoint.routeTableZoneNames?.length) {
+  if (
+    endpoint?.type === "gateway" &&
+    endpoint.policy === "default" &&
+    endpoint.routeTableZoneNames?.length
+  ) {
     return;
   }
 

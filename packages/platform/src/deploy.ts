@@ -19,9 +19,28 @@ if (!args.venture) {
 const target = args.target ?? "aws";
 const servicesRoot = path.join(repoRoot(), "infra/services");
 
-run("pnpm", ["platform:generate", "--", "--env", args.env, "--venture", args.venture, "--target", target, ...(args.services.length > 0 ? ["--services", args.services.join(",")] : [])], repoRoot());
+run(
+  "pnpm",
+  [
+    "platform:generate",
+    "--",
+    "--env",
+    args.env,
+    "--venture",
+    args.venture,
+    "--target",
+    target,
+    ...(args.services.length > 0 ? ["--services", args.services.join(",")] : []),
+  ],
+  repoRoot(),
+);
 
-const services = await discoverServices({ env: args.env, venture: args.venture, services: args.services, servicesRoot });
+const services = await discoverServices({
+  env: args.env,
+  venture: args.venture,
+  services: args.services,
+  servicesRoot,
+});
 
 for (const service of [...services].sort(compareDeployOrder)) {
   const cwd = generatedDirectoryForService(service.metadata, target);
@@ -30,9 +49,15 @@ for (const service of [...services].sort(compareDeployOrder)) {
   run("terraform", ["apply", "tfplan"], cwd);
 }
 
-function compareDeployOrder(left: Awaited<ReturnType<typeof discoverServices>>[number], right: Awaited<ReturnType<typeof discoverServices>>[number]): number {
-  return serviceDeployPriority(left.metadata.serviceType) - serviceDeployPriority(right.metadata.serviceType)
-    || left.metadata.serviceName.localeCompare(right.metadata.serviceName);
+function compareDeployOrder(
+  left: Awaited<ReturnType<typeof discoverServices>>[number],
+  right: Awaited<ReturnType<typeof discoverServices>>[number],
+): number {
+  return (
+    serviceDeployPriority(left.metadata.serviceType) -
+      serviceDeployPriority(right.metadata.serviceType) ||
+    left.metadata.serviceName.localeCompare(right.metadata.serviceName)
+  );
 }
 
 function serviceDeployPriority(serviceType: string): number {
@@ -51,8 +76,15 @@ function repoRoot(): string {
   return path.resolve(import.meta.dirname, "../../..");
 }
 
-function parseArgs(argv: string[]): { env?: string; venture?: string; target?: DeployTarget; services: string[] } {
-  const parsed: { env?: string; venture?: string; target?: DeployTarget; services: string[] } = { services: [] };
+function parseArgs(argv: string[]): {
+  env?: string;
+  venture?: string;
+  target?: DeployTarget;
+  services: string[];
+} {
+  const parsed: { env?: string; venture?: string; target?: DeployTarget; services: string[] } = {
+    services: [],
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -102,12 +134,16 @@ function parseTarget(value: string): DeployTarget {
   throw new Error(`Unsupported target: ${value}`);
 }
 
-function run(command: string, args: string[], cwd: string): void {
-  console.log(`Running: ${command} ${args.join(" ")} in ${cwd}`);
-  const result = spawnSync(command, args, { cwd, stdio: "inherit", env: localEnvironment() });
+function run(command: string, commandArgs: string[], cwd: string): void {
+  console.log(`Running: ${command} ${commandArgs.join(" ")} in ${cwd}`);
+  const result = spawnSync(command, commandArgs, {
+    cwd,
+    stdio: "inherit",
+    env: localEnvironment(),
+  });
 
   if (result.status !== 0) {
-    throw new Error(`Command failed: ${command} ${args.join(" ")}`);
+    throw new Error(`Command failed: ${command} ${commandArgs.join(" ")}`);
   }
 }
 

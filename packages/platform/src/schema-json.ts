@@ -10,7 +10,10 @@ export function generateSchema(schema: z.ZodType, metadata: JsonSchemaMetadata):
   return JSON.stringify(generateSchemaObject(schema, metadata), null, 2);
 }
 
-export function generateSchemaObject(schema: z.ZodType, metadata: JsonSchemaMetadata): Record<string, unknown> {
+export function generateSchemaObject(
+  schema: z.ZodType,
+  metadata: JsonSchemaMetadata,
+): Record<string, unknown> {
   const jsonSchema = schema.toJSONSchema() as Record<string, unknown>;
 
   return {

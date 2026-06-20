@@ -15,6 +15,8 @@ type PaymentBody = {
   message?: string;
 };
 
+type PaymentBodyKey = keyof PaymentBody;
+
 type DynamoDbSender = {
   send(command: PutItemCommand): Promise<unknown>;
 };
@@ -25,18 +27,20 @@ type HandlerOptions = {
 };
 
 export function createHandler({ tableName, dynamoDbClient }: HandlerOptions) {
-  return async function handler(event: ApiGatewayEvent): Promise<ApiGatewayResponse> {
+  return async function handlePayment(event: ApiGatewayEvent): Promise<ApiGatewayResponse> {
     const body = parseBody(event);
     const customerId = body.customerId ?? body.paymentId ?? `customer-${Date.now()}`;
     const message = body.message ?? "created";
 
-    await dynamoDbClient.send(new PutItemCommand({
+    await dynamoDbClient.send(
+      new PutItemCommand({
         TableName: tableName,
         Item: {
           customerId: { S: customerId },
           message: { S: message },
         },
-    }));
+      }),
+    );
 
     return {
       statusCode: 200,
@@ -66,10 +70,37 @@ function parseBody(event: ApiGatewayEvent): PaymentBody {
   }
 
   if (typeof event.body === "string") {
-    return JSON.parse(event.body) as PaymentBody;
+    return paymentBodyFrom(JSON.parse(event.body));
   }
 
-  return event.body as PaymentBody;
+  return paymentBodyFrom(event.body);
+}
+
+function paymentBodyFrom(value: unknown): PaymentBody {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return {
+    customerId: propertyString(value, "customerId"),
+    paymentId: propertyString(value, "paymentId"),
+    message: propertyString(value, "message"),
+  };
+}
+
+function propertyString(
+  value: Partial<Record<PaymentBodyKey, unknown>>,
+  property: PaymentBodyKey,
+): string | undefined {
+  if (!(property in value)) {
+    return undefined;
+  }
+
+  return stringOrUndefined(value[property]);
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function requiredEnv(name: string): string {

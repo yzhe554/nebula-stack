@@ -67,7 +67,7 @@ pnpm floci:invoke:payment-api customer-demo-1 approved-from-demo
 Expected response:
 
 ```json
-{"statusCode":200,"body":"{\"customerId\":\"customer-demo-1\",\"stored\":true}"}
+{ "statusCode": 200, "body": "{\"customerId\":\"customer-demo-1\",\"stored\":true}" }
 ```
 
 ## 5. Verify DynamoDB

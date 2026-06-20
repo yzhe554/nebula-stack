@@ -9,42 +9,53 @@ describe("discoverServices", () => {
     const root = await mkdtemp(path.join(tmpdir(), "platform-services-"));
     const servicesRoot = path.join(root, "services");
     await mkdir(path.join(servicesRoot, "dev", "venture", "core", "internal"), { recursive: true });
-    await mkdir(path.join(servicesRoot, "prod", "venture", "core", "internal"), { recursive: true });
+    await mkdir(path.join(servicesRoot, "prod", "venture", "core", "internal"), {
+      recursive: true,
+    });
 
-    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "internal", "payment-api.lambda.yaml"), [
-      "runtime: nodejs22.x",
-      "handler: index.handler",
-      "package: ../../dist/payment-api.zip",
-      "memoryMb: 128",
-      "timeoutSeconds: 10",
-      "logRetentionDays: 7",
-      "environment: {}",
-      "permissions:",
-      "  dynamodb: []",
-    ].join("\n"));
-    await writeFile(path.join(servicesRoot, "prod", "venture", "core", "internal", "payment-api.lambda.yaml"), [
-      "runtime: nodejs22.x",
-      "handler: index.handler",
-      "package: ../../dist/payment-api.zip",
-      "memoryMb: 128",
-      "timeoutSeconds: 10",
-      "logRetentionDays: 7",
-      "environment: {}",
-      "permissions:",
-      "  dynamodb: []",
-    ].join("\n"));
-    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "network.yaml"), [
-      "cidrs:",
-      "  ipv4:",
-      "    vpc: 10.20.0.0/16",
-      "zones:",
-      "  internal:",
-      "    description: Application services that are not public.",
-      "    subnets:",
-      "      - 10.20.10.0/24",
-      "flows: []",
-      "awsEndpoints: {}",
-    ].join("\n"));
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "internal", "payment-api.lambda.yaml"),
+      [
+        "runtime: nodejs22.x",
+        "handler: index.handler",
+        "package: ../../dist/payment-api.zip",
+        "memoryMb: 128",
+        "timeoutSeconds: 10",
+        "logRetentionDays: 7",
+        "environment: {}",
+        "permissions:",
+        "  dynamodb: []",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(servicesRoot, "prod", "venture", "core", "internal", "payment-api.lambda.yaml"),
+      [
+        "runtime: nodejs22.x",
+        "handler: index.handler",
+        "package: ../../dist/payment-api.zip",
+        "memoryMb: 128",
+        "timeoutSeconds: 10",
+        "logRetentionDays: 7",
+        "environment: {}",
+        "permissions:",
+        "  dynamodb: []",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "network.yaml"),
+      [
+        "cidrs:",
+        "  ipv4:",
+        "    vpc: 10.20.0.0/16",
+        "zones:",
+        "  internal:",
+        "    description: Application services that are not public.",
+        "    subnets:",
+        "      - 10.20.10.0/24",
+        "flows: []",
+        "awsEndpoints: {}",
+      ].join("\n"),
+    );
 
     const services = await discoverServices({
       env: "dev",
@@ -74,27 +85,33 @@ describe("discoverServices", () => {
     const servicesRoot = path.join(root, "services");
     await mkdir(path.join(servicesRoot, "dev", "venture", "core", "public"), { recursive: true });
 
-    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "public", "docs.apigateway.yaml"), [
-      "description: Docs and API gateway",
-      "routes:",
-      "  - path: /{proxy+}",
-      "    method: ANY",
-      "    target:",
-      "      type: http_proxy",
-      "      uri: http://host.docker.internal:3001/{proxy}",
-    ].join("\n"));
-    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "network.yaml"), [
-      "cidrs:",
-      "  ipv4:",
-      "    vpc: 10.20.0.0/16",
-      "zones:",
-      "  public:",
-      "    description: Public ingress services.",
-      "    subnets:",
-      "      - 10.20.1.0/24",
-      "flows: []",
-      "awsEndpoints: {}",
-    ].join("\n"));
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "public", "docs.apigateway.yaml"),
+      [
+        "description: Docs and API gateway",
+        "routes:",
+        "  - path: /{proxy+}",
+        "    method: ANY",
+        "    target:",
+        "      type: http_proxy",
+        "      uri: http://host.docker.internal:3001/{proxy}",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "network.yaml"),
+      [
+        "cidrs:",
+        "  ipv4:",
+        "    vpc: 10.20.0.0/16",
+        "zones:",
+        "  public:",
+        "    description: Public ingress services.",
+        "    subnets:",
+        "      - 10.20.1.0/24",
+        "flows: []",
+        "awsEndpoints: {}",
+      ].join("\n"),
+    );
 
     const services = await discoverServices({ env: "dev", venture: "venture", servicesRoot });
 
@@ -121,7 +138,9 @@ describe("discoverServices", () => {
     const root = await mkdtemp(path.join(tmpdir(), "platform-services-"));
     const servicesRoot = path.join(root, "services");
     await mkdir(path.join(servicesRoot, "dev", "venture", "core", "internal"), { recursive: true });
-    await mkdir(path.join(servicesRoot, "dev", "venture", "analytics", "internal"), { recursive: true });
+    await mkdir(path.join(servicesRoot, "dev", "venture", "analytics", "internal"), {
+      recursive: true,
+    });
 
     const yaml = [
       "runtime: nodejs22.x",
@@ -134,9 +153,17 @@ describe("discoverServices", () => {
       "permissions:",
       "  dynamodb: []",
     ].join("\n");
-    await writeFile(path.join(servicesRoot, "dev", "venture", "core", "internal", "payment-api.lambda.yaml"), yaml);
-    await writeFile(path.join(servicesRoot, "dev", "venture", "analytics", "internal", "payment-api.lambda.yaml"), yaml);
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "internal", "payment-api.lambda.yaml"),
+      yaml,
+    );
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "analytics", "internal", "payment-api.lambda.yaml"),
+      yaml,
+    );
 
-    await expect(discoverServices({ env: "dev", servicesRoot })).rejects.toThrow("Duplicate service name");
+    await expect(discoverServices({ env: "dev", servicesRoot })).rejects.toThrow(
+      "Duplicate service name",
+    );
   });
 });
