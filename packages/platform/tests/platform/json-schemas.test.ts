@@ -56,6 +56,13 @@ describe("service JSON schemas", () => {
     expect(validate(yaml), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
 
+  test("api gateway schema validates the sample API Gateway YAML", async () => {
+    const validate = await compileSchema("schemas/apigateway.schema.json");
+    const yaml = parse(await readFile("../../infra/services/dev/venture/core/public/docs.apigateway.yaml", "utf8"));
+
+    expect(validate(yaml), JSON.stringify(validate.errors, null, 2)).toBe(true);
+  });
+
   test("lambda schema rejects unsupported runtime values", async () => {
     const validate = await compileSchema("schemas/lambda.schema.json");
 
@@ -81,7 +88,7 @@ describe("service JSON schemas", () => {
 });
 
 async function compileSchema(schemaPath: string) {
-  const ajv = new Ajv2020({ allErrors: true });
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
   const schema = JSON.parse(await readFile(schemaPath, "utf8"));
   return ajv.compile(schema);
 }

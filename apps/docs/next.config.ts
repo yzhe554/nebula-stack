@@ -1,9 +1,12 @@
 import type { NextConfig } from "next";
 
 const gatewayPath = process.env.NEXT_PUBLIC_GATEWAY_PATH;
+const docsBasePath = "/docs";
+const assetPrefix = gatewayPath ? `${gatewayPath}${docsBasePath}` : undefined;
 
 const nextConfig: NextConfig = {
-  ...(gatewayPath ? { assetPrefix: gatewayPath } : {}),
+  basePath: docsBasePath,
+  ...(assetPrefix ? { assetPrefix } : {}),
   async rewrites() {
     if (!gatewayPath) {
       return [];
@@ -11,8 +14,8 @@ const nextConfig: NextConfig = {
 
     return [
       {
-        source: `${gatewayPath}/:path*`,
-        destination: "/:path*",
+        source: `${gatewayPath}${docsBasePath}/:path*`,
+        destination: `${docsBasePath}/:path*`,
       },
     ];
   },

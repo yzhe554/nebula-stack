@@ -215,16 +215,29 @@ describe("terraformForService", () => {
       },
       config: {
         description: "Docs and API gateway",
+        domain: {
+          floci: {
+            name: "app.localhost.floci.io",
+            zoneName: "localhost.floci.io",
+          },
+          aws: {
+            name: "app.dev.example.com",
+            zoneName: "dev.example.com",
+            certificate: {
+              lookupDomain: "*.dev.example.com",
+            },
+          },
+        },
         routes: [
           {
-            path: "/",
+            path: "/docs",
             method: "ANY",
-            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/" },
+            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/docs" },
           },
           {
-            path: "/{proxy+}",
+            path: "/docs/{proxy+}",
             method: "ANY",
-            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/{proxy}" },
+            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/docs/{proxy}" },
           },
           {
             path: "/api/payments",
@@ -250,16 +263,16 @@ describe("terraformForService", () => {
       ignore_changes: ["tags", "tags_all"],
     });
     expect(terraform.resource.aws_apigatewayv2_stage.docs_default.tags).toBeUndefined();
-    expect(terraform.resource.aws_apigatewayv2_integration.docs_http_proxy_proxy).toMatchObject({
+    expect(terraform.resource.aws_apigatewayv2_integration.docs_http_proxy_docs_proxy).toMatchObject({
       api_id: "${aws_apigatewayv2_api.docs.id}",
       integration_type: "HTTP_PROXY",
-      integration_uri: "http://host.docker.internal:3001/{proxy}",
+      integration_uri: "http://host.docker.internal:3001/docs/{proxy}",
       integration_method: "ANY",
     });
-    expect(terraform.resource.aws_apigatewayv2_integration.docs_http_proxy_root).toMatchObject({
+    expect(terraform.resource.aws_apigatewayv2_integration.docs_http_proxy_docs).toMatchObject({
       api_id: "${aws_apigatewayv2_api.docs.id}",
       integration_type: "HTTP_PROXY",
-      integration_uri: "http://host.docker.internal:3001/",
+      integration_uri: "http://host.docker.internal:3001/docs",
       integration_method: "ANY",
     });
     expect(terraform.resource.aws_apigatewayv2_integration.docs_lambda_api_payments).toMatchObject({
@@ -268,8 +281,8 @@ describe("terraformForService", () => {
       integration_uri: "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:*:function:dev-venture-core-internal-payment-api/invocations",
       payload_format_version: "2.0",
     });
-    expect(terraform.resource.aws_apigatewayv2_route.docs_http_proxy_proxy.route_key).toBe("ANY /{proxy+}");
-    expect(terraform.resource.aws_apigatewayv2_route.docs_http_proxy_root.route_key).toBe("ANY /");
+    expect(terraform.resource.aws_apigatewayv2_route.docs_http_proxy_docs_proxy.route_key).toBe("ANY /docs/{proxy+}");
+    expect(terraform.resource.aws_apigatewayv2_route.docs_http_proxy_docs.route_key).toBe("ANY /docs");
     expect(terraform.resource.aws_apigatewayv2_route.docs_lambda_api_payments.route_key).toBe("POST /api/payments");
     expect(terraform.resource.aws_lambda_permission.docs_lambda_api_payments).toMatchObject({
       action: "lambda:InvokeFunction",
@@ -277,6 +290,11 @@ describe("terraformForService", () => {
       principal: "apigateway.amazonaws.com",
       source_arn: "${aws_apigatewayv2_api.docs.execution_arn}/*/*",
     });
+    expect(terraform.resource.aws_apigatewayv2_domain_name).toBeUndefined();
+    expect(terraform.resource.aws_apigatewayv2_api_mapping).toBeUndefined();
+    expect(terraform.data).toBeUndefined();
+    expect(terraform.resource.aws_route53_zone).toBeUndefined();
+    expect(terraform.resource.aws_route53_record).toBeUndefined();
 
     const awsTerraform = terraformForService(service, {
       target: "aws",
@@ -291,6 +309,100 @@ describe("terraformForService", () => {
       ServiceName: "docs",
       ServiceType: "apigateway",
     });
+    expect(awsTerraform.data.aws_route53_zone.docs).toEqual({
+      name: "dev.example.com",
+      private_zone: false,
+    });
+    expect(awsTerraform.data.aws_acm_certificate.docs).toEqual({
+      domain: "*.dev.example.com",
+      statuses: ["ISSUED"],
+      most_recent: true,
+    });
+    expect(awsTerraform.resource.aws_route53_zone).toBeUndefined();
+    expect(awsTerraform.resource.aws_route53_record.docs.name).toBe("app.dev.example.com");
+    expect(awsTerraform.resource.aws_apigatewayv2_domain_name.docs.domain_name).toBe("app.dev.example.com");
+    expect(awsTerraform.resource.aws_apigatewayv2_domain_name.docs.domain_name_configuration.certificate_arn).toBe(
+      "${data.aws_acm_certificate.docs.arn}",
+    );
+  });
+
+  test("requires an AWS API Gateway domain certificate config", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs",
+        serviceType: "apigateway",
+        sourcePath: "infra/services/dev/venture/core/public/docs.apigateway.yaml",
+      },
+      config: {
+        domain: {
+          floci: {
+            name: "app.localhost.floci.io",
+            zoneName: "localhost.floci.io",
+          },
+          aws: {
+            name: "app.dev.example.com",
+            zoneName: "dev.example.com",
+          },
+        },
+        routes: [
+          {
+            path: "/docs",
+            method: "ANY",
+            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/docs" },
+          },
+        ],
+      },
+    } as unknown as LoadedService;
+
+    expect(() => terraformForService(service, {
+      target: "aws",
+      serviceNames: {
+        "payment-api": "dev-venture-core-internal-payment-api",
+      },
+    })).toThrow("domain.aws.certificate is required for API Gateway domain app.dev.example.com");
+  });
+
+  test("supports explicit AWS API Gateway certificate ARNs", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs",
+        serviceType: "apigateway",
+        sourcePath: "infra/services/dev/venture/core/public/docs.apigateway.yaml",
+      },
+      config: {
+        domain: {
+          aws: {
+            name: "app.dev.example.com",
+            zoneName: "dev.example.com",
+            certificate: {
+              arn: "arn:aws:acm:ap-southeast-2:123456789012:certificate/example",
+            },
+          },
+        },
+        routes: [
+          {
+            path: "/docs",
+            method: "ANY",
+            target: { type: "http_proxy", uri: "http://host.docker.internal:3001/docs" },
+          },
+        ],
+      },
+    };
+
+    const terraform = terraformForService(service, { target: "aws" }) as any;
+
+    expect(terraform.data.aws_acm_certificate).toBeUndefined();
+    expect(terraform.resource.aws_apigatewayv2_domain_name.docs.domain_name_configuration.certificate_arn).toBe(
+      "arn:aws:acm:ap-southeast-2:123456789012:certificate/example",
+    );
   });
 
   test("injects local AWS endpoint URL for Floci Lambda deployments", () => {

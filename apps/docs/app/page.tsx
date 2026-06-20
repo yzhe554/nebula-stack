@@ -47,7 +47,7 @@ const commands = [
   ["Reset and redeploy", "pnpm floci:redeploy:all"],
 ];
 
-const apiGatewayUrl = "http://localhost:4566/execute-api/<api-id>/$default/";
+const apiGatewayUrl = "http://localhost:4566/execute-api/<api-id>/$default/docs";
 
 export default function Home() {
   return (
@@ -162,7 +162,7 @@ export default function Home() {
             <h2>Local ingress uses Floci path-style URLs</h2>
             <p>
               After <code>pnpm floci:deploy:all</code>, get the HTTP API id from Floci and open
-              <code>{apiGatewayUrl}</code>. The root route proxies to this docs app and
+              <code>{apiGatewayUrl}</code>. The `/docs` route proxies to this docs app and
               <code>/api/payments</code> invokes the Lambda route.
             </p>
           </div>

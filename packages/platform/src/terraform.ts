@@ -8,6 +8,7 @@ export type TerraformOptions = {
   target?: DeployTarget;
   moduleDirectory?: string;
   serviceNames?: Record<string, string>;
+  domainCertificateArns?: Record<string, string>;
 };
 
 type ApiGatewayLambdaRoute = ApiGatewayRoute & {
@@ -183,6 +184,8 @@ function terraformForApiGateway(
 ): TerraformJson {
   const resourceName = terraformName(service.metadata.serviceName);
 
+  const domainTerraform = apiGatewayDomainResources(service, resourceName, options);
+
   return baseTerraform(service.metadata, options, {
     aws_apigatewayv2_api: {
       [resourceName]: {
@@ -221,7 +224,8 @@ function terraformForApiGateway(
       }];
     })),
     ...apiGatewayLambdaPermissions(service, resourceName, options),
-  });
+    ...domainTerraform.resource,
+  }, domainTerraform.data);
 }
 
 function apiGatewayStageTagConfig(metadata: ServiceMetadata, options: TerraformOptions): Record<string, unknown> {
@@ -263,6 +267,99 @@ function apiGatewayLambdaPermissions(
       }];
     })),
   };
+}
+
+function apiGatewayDomainResources(
+  service: Extract<LoadedService, { metadata: { serviceType: "apigateway" } }>,
+  resourceName: string,
+  options: TerraformOptions,
+): { resource: Record<string, unknown>; data?: Record<string, unknown> } {
+  const target = options.target ?? "aws";
+  const domain = service.config.domain?.[target];
+
+  if (!domain) {
+    return { resource: {} };
+  }
+
+  if (target === "floci") {
+    return { resource: {} };
+  }
+
+  const certificateArn = certificateArnForDomain(domain.certificate, resourceName)
+    ?? options.domainCertificateArns?.[domain.name];
+  if (!certificateArn) {
+    throw new Error(`domain.${target}.certificate is required for API Gateway domain ${domain.name}`);
+  }
+
+  const certificateData = domain.certificate && "lookupDomain" in domain.certificate
+    ? {
+        aws_acm_certificate: {
+          [resourceName]: {
+            domain: domain.certificate.lookupDomain,
+            statuses: ["ISSUED"],
+            most_recent: true,
+          },
+        },
+      }
+    : {};
+
+  const domainConfig: Record<string, unknown> = {
+    endpoint_type: "REGIONAL",
+    security_policy: "TLS_1_2",
+    certificate_arn: certificateArn,
+  };
+
+  return {
+    resource: {
+      aws_apigatewayv2_domain_name: {
+        [resourceName]: {
+          domain_name: domain.name,
+          domain_name_configuration: domainConfig,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_apigatewayv2_api_mapping: {
+        [resourceName]: {
+          api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
+          domain_name: `\${aws_apigatewayv2_domain_name.${resourceName}.id}`,
+          stage: `\${aws_apigatewayv2_stage.${resourceName}_default.id}`,
+        },
+      },
+      aws_route53_record: {
+        [resourceName]: {
+          zone_id: `\${data.aws_route53_zone.${resourceName}.zone_id}`,
+          name: domain.name,
+          type: "A",
+          alias: {
+            name: `\${aws_apigatewayv2_domain_name.${resourceName}.domain_name_configuration[0].target_domain_name}`,
+            zone_id: `\${aws_apigatewayv2_domain_name.${resourceName}.domain_name_configuration[0].hosted_zone_id}`,
+            evaluate_target_health: false,
+          },
+        },
+      },
+    },
+    data: {
+      ...certificateData,
+      aws_route53_zone: {
+        [resourceName]: {
+          name: domain.zoneName,
+          private_zone: false,
+        },
+      },
+    },
+  };
+}
+
+function certificateArnForDomain(certificate: { arn: string } | { lookupDomain: string } | undefined, resourceName: string): string | undefined {
+  if (!certificate) {
+    return undefined;
+  }
+
+  if ("arn" in certificate) {
+    return certificate.arn;
+  }
+
+  return `\${data.aws_acm_certificate.${resourceName}.arn}`;
 }
 
 function isApiGatewayLambdaRoute(
@@ -346,7 +443,7 @@ function terraformForDynamoDb(
   });
 }
 
-function baseTerraform(metadata: ServiceMetadata, options: TerraformOptions, resource: Record<string, unknown>): TerraformJson {
+function baseTerraform(metadata: ServiceMetadata, options: TerraformOptions, resource: Record<string, unknown>, data?: Record<string, unknown>): TerraformJson {
   return {
     terraform: {
       required_version: ">= 1.15.6",
@@ -360,6 +457,7 @@ function baseTerraform(metadata: ServiceMetadata, options: TerraformOptions, res
     provider: {
       aws: providerConfig(metadata, options.target ?? "aws"),
     },
+    ...(data ? { data } : {}),
     resource,
   };
 }
@@ -389,6 +487,7 @@ function providerConfig(metadata: ServiceMetadata, target: DeployTarget): Record
       apigatewayv2: "http://localhost:4566",
       dynamodb: "http://localhost:4566",
       iam: "http://localhost:4566",
+      route53: "http://localhost:4566",
       lambda: "http://localhost:4566",
       logs: "http://localhost:4566",
       s3: "http://localhost:4566",

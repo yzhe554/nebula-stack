@@ -53,10 +53,10 @@ pnpm floci:url
 Then open:
 
 ```text
-http://localhost:4566/execute-api/<api-id>/$default/
+http://localhost:4566/execute-api/<api-id>/$default/docs
 ```
 
-The root route proxies to `apps/docs`, and `POST /api/payments` invokes the Lambda route.
+The `/docs` route proxies to `apps/docs`, and `POST /api/payments` invokes the Lambda route.
 
 ## 4. Invoke The Lambda
 

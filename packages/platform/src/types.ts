@@ -45,8 +45,24 @@ export type DynamoDbConfig = {
 
 export type ApiGatewayConfig = {
   description?: string;
+  domain?: ApiGatewayDomain;
   routes: ApiGatewayRoute[];
 };
+
+export type ApiGatewayDomain = {
+  floci?: ApiGatewayTargetDomain;
+  aws?: ApiGatewayTargetDomain;
+};
+
+export type ApiGatewayTargetDomain = {
+  name: string;
+  zoneName: string;
+  certificate?: ApiGatewayCertificate;
+};
+
+export type ApiGatewayCertificate =
+  | { arn: string }
+  | { lookupDomain: string };
 
 export type ApiGatewayRoute = {
   path: string;

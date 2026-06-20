@@ -26,7 +26,7 @@ fi
 export NEXT_PUBLIC_GATEWAY_PATH="/execute-api/$api_id/\$default"
 
 echo "Starting docs with gateway path: $NEXT_PUBLIC_GATEWAY_PATH"
-echo "Open: $ENDPOINT_URL$NEXT_PUBLIC_GATEWAY_PATH/"
+echo "Open: $ENDPOINT_URL$NEXT_PUBLIC_GATEWAY_PATH/docs"
 
 if ! lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
   rm -f apps/docs/.next/dev/lock

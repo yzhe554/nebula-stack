@@ -12,8 +12,7 @@ api_id="$(AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=u
 
 if [[ -z "$api_id" || "$api_id" == "None" ]]; then
   if [[ -d "$STATE_DIR" ]]; then
-    api_id="$(terraform -chdir="$STATE_DIR" state show aws_apigatewayv2_api.docs 2>/dev/null \
-      | awk -F '"' '/^[[:space:]]*id[[:space:]]*=/{ print $2; exit }')"
+    api_id="$(jq -r '.resources[] | select(.type == "aws_apigatewayv2_api" and .name == "docs") | .instances[0].attributes.id // empty' "$STATE_DIR/terraform.tfstate" 2>/dev/null || true)"
   fi
 fi
 
@@ -27,13 +26,13 @@ gateway_path="/execute-api/$api_id/\$default"
 
 cat <<URLS
 Docs via Floci:
-$ENDPOINT_URL$gateway_path/
+$ENDPOINT_URL$gateway_path/docs
 
 Payment API via Floci:
 $ENDPOINT_URL$gateway_path/api/payments
 
 Docs direct:
-http://localhost:3001/
+http://localhost:3001/docs
 
 For static assets through Floci, start docs with:
 pnpm docs:dev:floci

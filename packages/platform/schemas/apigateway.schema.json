@@ -3,8 +3,124 @@
   "type": "object",
   "properties": {
     "description": {
+      "description": "Human-readable description for the generated HTTP API.",
       "type": "string",
       "minLength": 1
+    },
+    "domain": {
+      "description": "Optional custom domain and Route 53 settings for exposing this API Gateway with a human-readable hostname.",
+      "type": "object",
+      "properties": {
+        "floci": {
+          "description": "Local Floci custom domain and Route 53 settings.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Full custom domain name for this API Gateway, such as app.dev.example.com. Terraform maps this domain to the HTTP API."
+            },
+            "zoneName": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Existing Route 53 hosted zone name that owns the domain record, such as dev.example.com. AWS deployments look up this zone; Floci deployments create it locally."
+            },
+            "certificate": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "arn": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Explicit ACM certificate ARN for this API Gateway custom domain."
+                    }
+                  },
+                  "required": [
+                    "arn"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "lookupDomain": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Domain name to use when looking up an ISSUED ACM certificate, such as *.dev.example.com."
+                    }
+                  },
+                  "required": [
+                    "lookupDomain"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "ACM certificate config for AWS API Gateway custom domains. Use arn for explicit references or lookupDomain to find an existing issued certificate."
+            }
+          },
+          "required": [
+            "name",
+            "zoneName"
+          ],
+          "additionalProperties": false
+        },
+        "aws": {
+          "description": "AWS custom domain and Route 53 settings.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Full custom domain name for this API Gateway, such as app.dev.example.com. Terraform maps this domain to the HTTP API."
+            },
+            "zoneName": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Existing Route 53 hosted zone name that owns the domain record, such as dev.example.com. AWS deployments look up this zone; Floci deployments create it locally."
+            },
+            "certificate": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "arn": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Explicit ACM certificate ARN for this API Gateway custom domain."
+                    }
+                  },
+                  "required": [
+                    "arn"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "lookupDomain": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Domain name to use when looking up an ISSUED ACM certificate, such as *.dev.example.com."
+                    }
+                  },
+                  "required": [
+                    "lookupDomain"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "ACM certificate config for AWS API Gateway custom domains. Use arn for explicit references or lookupDomain to find an existing issued certificate."
+            }
+          },
+          "required": [
+            "name",
+            "zoneName"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "routes": {
       "minItems": 1,
@@ -77,7 +193,8 @@
           "target"
         ],
         "additionalProperties": false
-      }
+      },
+      "description": "HTTP API routes and their integration targets."
     }
   },
   "required": [
