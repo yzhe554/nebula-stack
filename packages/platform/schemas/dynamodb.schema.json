@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "billingMode": {
+      "type": "string",
+      "const": "PAY_PER_REQUEST"
+    },
+    "hashKey": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "S",
+            "N",
+            "B"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "rangeKey": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "S",
+            "N",
+            "B"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "pointInTimeRecovery": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "billingMode",
+    "hashKey",
+    "pointInTimeRecovery"
+  ],
+  "additionalProperties": false,
+  "$id": "https://example.local/packages/platform/schemas/dynamodb.schema.json",
+  "title": "Platform DynamoDB Service",
+  "description": "YAML schema for AWS DynamoDB tables deployed by the platform."
+}

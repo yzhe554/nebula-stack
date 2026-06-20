@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=../../../../packages/platform/schemas/network.schema.json
+cidrs:
+  ipv4:
+    vpc: 10.20.0.0/16
+
+zones:
+  public:
+    description: Public edge-facing services.
+    subnets:
+      - 10.20.0.0/24
+      - 10.20.1.0/24
+
+  internal:
+    description: Application services that are not public.
+    subnets:
+      - 10.20.10.0/24
+      - 10.20.11.0/24
+
+  restricted:
+    description: Data services and sensitive resources.
+    subnets:
+      - 10.20.20.0/24
+      - 10.20.21.0/24
+
+flows:
+  - from: public
+    to: internal
+    ports: [443]
+
+  - from: internal
+    to: restricted
+    ports: [443]
+
+  - from: internal
+    to: aws
+    services: [dynamodb, logs]
+
+  - from: restricted
+    to: aws
+    services: [kms, logs]
+
+awsEndpoints:
+  dynamodb:
+    type: gateway
+    serviceName: com.amazonaws.ap-southeast-2.dynamodb
+    routeTableZoneNames:
+      - internal
+      - restricted
+    policy: default

@@ -1,5 +1,7 @@
 node_modules/
+.turbo/
 generated/
+__generated__/
 .terraform/
 .terraform.lock.hcl
 *.tfstate

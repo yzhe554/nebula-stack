@@ -7,7 +7,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "outDir": "dist-ts"
-  },
-  "include": ["src/**/*.ts", "schemas/**/*.ts", "tests/**/*.ts"]
+  }
 }

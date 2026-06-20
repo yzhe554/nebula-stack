@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "nodejs22.x",
+        "nodejs20.x",
+        "python3.13",
+        "python3.12",
+        "java21",
+        "dotnet8",
+        "provided.al2023"
+      ]
+    },
+    "handler": {
+      "type": "string",
+      "minLength": 1
+    },
+    "package": {
+      "type": "string",
+      "minLength": 1
+    },
+    "memoryMb": {
+      "type": "integer",
+      "minimum": 128,
+      "maximum": 10240
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 900
+    },
+    "logRetentionDays": {
+      "type": "number",
+      "enum": [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "dynamodb": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "service": {
+                "type": "string",
+                "minLength": 1
+              },
+              "actions": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "dynamodb:PutItem",
+                    "dynamodb:GetItem",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:DeleteItem",
+                    "dynamodb:Query",
+                    "dynamodb:Scan"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "service",
+              "actions"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "dynamodb"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "runtime",
+    "handler",
+    "package",
+    "memoryMb",
+    "timeoutSeconds",
+    "logRetentionDays",
+    "environment",
+    "permissions"
+  ],
+  "additionalProperties": false,
+  "$id": "https://example.local/packages/platform/schemas/lambda.schema.json",
+  "title": "Platform Lambda Service",
+  "description": "YAML schema for AWS Lambda services deployed by the platform."
+}

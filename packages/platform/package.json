@@ -1,0 +1,30 @@
+{
+  "name": "@repo/platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsx --no-cache src/generate.ts",
+    "deploy": "tsx --no-cache src/deploy.ts",
+    "schema:sync": "tsx --no-cache src/sync-schemas.ts",
+    "validate": "tsx --no-cache src/validate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "floci:reset:all": "./scripts/floci-reset-all.sh",
+    "floci:reset:ddb": "./scripts/floci-ddb-reset.sh",
+    "floci:invoke:payment-api": "./scripts/floci-invoke-payment-api.sh",
+    "floci:get:item": "./scripts/floci-ddb-get-item.sh",
+    "floci:list:tables": "./scripts/floci-ddb-list-tables.sh"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
+  }
+}

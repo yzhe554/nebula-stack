@@ -1,0 +1,17 @@
+{
+  "name": "@repo/payment-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "package": "rm -rf ../../dist/payment-api-package ../../dist/payment-api.zip && mkdir -p ../../dist/payment-api-package && rolldown -c rolldown.config.mjs && printf '{\"type\":\"module\"}\n' > ../../dist/payment-api-package/package.json && cd ../../dist/payment-api-package && zip -r ../payment-api.zip index.js package.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1072.0"
+  },
+  "devDependencies": {
+    "rolldown": "^1.1.2",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9"
+  }
+}

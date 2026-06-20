@@ -4,7 +4,7 @@
 
 **Goal:** Build a TypeScript-based YAML-to-Terraform generator that supports Lambda and DynamoDB service configs and deploys selected services for one environment and venture at a time, either to real AWS or local Floci.
 
-**Architecture:** Users define services under `services/<env>/<venture>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml`. TypeScript CLI commands validate YAML, derive metadata from paths, and generate one Terraform JSON root module per selected service under `generated/<target>/<env>/<venture>/<service-name>/main.tf.json`. Each service is intended to have separate Terraform state scoped by target, environment, venture, and service.
+**Architecture:** Users define services under `infra/services/<env>/<venture>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml`. TypeScript CLI commands validate YAML, derive metadata from paths, and generate one Terraform JSON root module per selected service under `__generated__/<target>/<env>/<venture>/<service-name>/main.tf.json`. Each service is intended to have separate Terraform state scoped by target, environment, venture, and service.
 
 **Tech Stack:** Node.js, TypeScript, pnpm scripts, `tsx`, `yaml`, `zod`, Terraform JSON configuration, AWS provider.
 
@@ -14,14 +14,14 @@
 
 - Create `package.json` for TypeScript scripts and dependencies.
 - Create `tsconfig.json` for strict TypeScript settings.
-- Create `src/platform/types.ts` for shared metadata and service config types.
-- Create `src/platform/service-discovery.ts` for scanning `services/<env>/**` and parsing service paths.
-- Create `src/platform/schemas.ts` for Lambda and DynamoDB Zod schemas.
-- Create `schemas/lambda.schema.json` and `schemas/dynamodb.schema.json` for YAML editor validation.
-- Create `src/platform/terraform.ts` for Terraform JSON generation helpers.
-- Create `src/platform/generate.ts` for the `generate` CLI.
-- Create `src/platform/deploy.ts` for the `deploy` CLI wrapper around Terraform.
-- Create example service files under `services/dev/core/internal/` and `services/dev/core/restricted/`.
+- Create `packages/platform/src/types.ts` for shared metadata and service config types.
+- Create `packages/platform/src/service-discovery.ts` for scanning `infra/services/<env>/**` and parsing service paths.
+- Create `packages/platform/src/schemas.ts` for Lambda and DynamoDB Zod schemas.
+- Create `packages/platform/schemas/lambda.schema.json` and `packages/platform/schemas/dynamodb.schema.json` for YAML editor validation.
+- Create `packages/platform/src/terraform.ts` for Terraform JSON generation helpers.
+- Create `packages/platform/src/generate.ts` for the `generate` CLI.
+- Create `packages/platform/src/deploy.ts` for the `deploy` CLI wrapper around Terraform.
+- Create example service files under `infra/services/dev/core/internal/` and `infra/services/dev/core/restricted/`.
 - Modify `terraform.tf` only if needed after generated Terraform owns provider config.
 - Create `.gitignore` for generated output and local Terraform files.
 - Create `.github/workflows/terraform.yml` for manual selected-service deployment.
@@ -41,8 +41,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "tsx src/platform/generate.ts",
-    "deploy": "tsx src/platform/deploy.ts",
+    "generate": "tsx packages/platform/src/generate.ts",
+    "deploy": "tsx packages/platform/src/deploy.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -79,7 +79,7 @@
 
 ```gitignore
 node_modules/
-generated/
+__generated__/
 .terraform/
 .terraform.lock.hcl
 *.tfstate
@@ -102,10 +102,10 @@ Expected: command succeeds or reports no input files before source files exist.
 ## Task 2: Add Service Types and Schemas
 
 **Files:**
-- Create: `src/platform/types.ts`
-- Create: `src/platform/schemas.ts`
+- Create: `packages/platform/src/types.ts`
+- Create: `packages/platform/src/schemas.ts`
 
-- [ ] **Step 1: Create `src/platform/types.ts`**
+- [ ] **Step 1: Create `packages/platform/src/types.ts`**
 
 ```ts
 export type ServiceType = "lambda" | "dynamodb";
@@ -155,7 +155,7 @@ export type LoadedService =
     };
 ```
 
-- [ ] **Step 2: Create `src/platform/schemas.ts`**
+- [ ] **Step 2: Create `packages/platform/src/schemas.ts`**
 
 ```ts
 import { z } from "zod";
@@ -192,9 +192,9 @@ Expected: PASS.
 ## Task 3: Implement Service Discovery
 
 **Files:**
-- Create: `src/platform/service-discovery.ts`
+- Create: `packages/platform/src/service-discovery.ts`
 
-- [ ] **Step 1: Create `src/platform/service-discovery.ts`**
+- [ ] **Step 1: Create `packages/platform/src/service-discovery.ts`**
 
 ```ts
 import { readdir, readFile } from "node:fs/promises";
@@ -273,7 +273,7 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
   const parts = relative.split(path.sep);
 
   if (parts.length !== 4) {
-    throw new Error(`Service file must match services/<env>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml: ${filePath}`);
+    throw new Error(`Service file must match infra/services/<env>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml: ${filePath}`);
   }
 
   const [env, vpc, securityZone, fileName] = parts;
@@ -321,9 +321,9 @@ Expected: PASS.
 ## Task 4: Implement Terraform JSON Generation
 
 **Files:**
-- Create: `src/platform/terraform.ts`
+- Create: `packages/platform/src/terraform.ts`
 
-- [ ] **Step 1: Create `src/platform/terraform.ts`**
+- [ ] **Step 1: Create `packages/platform/src/terraform.ts`**
 
 ```ts
 import type { LoadedService, ServiceMetadata } from "./types.js";
@@ -475,9 +475,9 @@ Expected: PASS.
 ## Task 5: Add Generate CLI
 
 **Files:**
-- Create: `src/platform/generate.ts`
+- Create: `packages/platform/src/generate.ts`
 
-- [ ] **Step 1: Create `src/platform/generate.ts`**
+- [ ] **Step 1: Create `packages/platform/src/generate.ts`**
 
 ```ts
 import { mkdir, writeFile } from "node:fs/promises";
@@ -538,8 +538,8 @@ Expected: PASS.
 ## Task 6: Add Example Service YAML Files
 
 **Files:**
-- Create: `services/dev/core/internal/payment-api.lambda.yaml`
-- Create: `services/dev/core/restricted/customer-records.dynamodb.yaml`
+- Create: `infra/services/dev/core/internal/payment-api.lambda.yaml`
+- Create: `infra/services/dev/core/restricted/customer-records.dynamodb.yaml`
 
 - [ ] **Step 1: Create Lambda example**
 
@@ -573,9 +573,9 @@ Expected: generated Terraform JSON files are created for `payment-api` and `cust
 ## Task 7: Add Deploy CLI
 
 **Files:**
-- Create: `src/platform/deploy.ts`
+- Create: `packages/platform/src/deploy.ts`
 
-- [ ] **Step 1: Create `src/platform/deploy.ts`**
+- [ ] **Step 1: Create `packages/platform/src/deploy.ts`**
 
 ```ts
 import { spawnSync } from "node:child_process";
@@ -711,8 +711,8 @@ Edit `.github/workflows/terraform.yml` and replace `arn:aws:iam::<ACCOUNT_ID>:ro
 ## Task 9: Validate End-to-End Locally
 
 **Files:**
-- Generated: `generated/dev/payment-api/main.tf.json`
-- Generated: `generated/dev/customer-records/main.tf.json`
+- Generated: `__generated__/dev/payment-api/main.tf.json`
+- Generated: `__generated__/dev/customer-records/main.tf.json`
 
 - [ ] **Step 1: Typecheck**
 
@@ -724,7 +724,7 @@ Expected: PASS.
 
 Run: `pnpm platform:generate -- --env dev --venture venture --services customer-records`
 
-Expected: `generated/dev/customer-records/main.tf.json` is created.
+Expected: `__generated__/dev/customer-records/main.tf.json` is created.
 
 - [ ] **Step 3: Generate multiple services**
 
@@ -734,7 +734,7 @@ Expected: both generated service folders are created.
 
 - [ ] **Step 4: Validate DynamoDB Terraform**
 
-Run: `cd generated/dev/customer-records && terraform init && terraform validate`
+Run: `cd __generated__/dev/customer-records && terraform init && terraform validate`
 
 Expected: Terraform initializes the AWS provider and reports valid configuration.
 
@@ -742,7 +742,7 @@ Expected: Terraform initializes the AWS provider and reports valid configuration
 
 Create `dist/payment-api.zip` from the real app or a placeholder package before planning Lambda.
 
-Run: `cd generated/dev/payment-api && terraform init && terraform validate`
+Run: `cd __generated__/dev/payment-api && terraform init && terraform validate`
 
 Expected: Terraform reports valid configuration.
 

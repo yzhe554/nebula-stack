@@ -9,15 +9,15 @@ Build a small platform in this repository that lets users define AWS services in
 Service configuration files live under:
 
 ```text
-services/<env>/<venture>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml
+infra/services/<env>/<venture>/<vpc>/<security-zone>/<service-name>.<service-type>.yaml
 ```
 
 Example:
 
 ```text
-services/dev/venture/core/internal/payment-api.lambda.yaml
-services/dev/venture/core/restricted/customer-records.dynamodb.yaml
-services/prod/venture/core/internal/payment-api.lambda.yaml
+infra/services/dev/venture/core/internal/payment-api.lambda.yaml
+infra/services/dev/venture/core/restricted/customer-records.dynamodb.yaml
+infra/services/prod/venture/core/internal/payment-api.lambda.yaml
 ```
 
 The generator derives these fields from the path:
@@ -45,8 +45,8 @@ All service-owned configuration must be explicit in YAML. The schemas avoid hidd
 Schema files live under:
 
 ```text
-schemas/lambda.schema.json
-schemas/dynamodb.schema.json
+packages/platform/schemas/lambda.schema.json
+packages/platform/schemas/dynamodb.schema.json
 ```
 
 Service YAML files may include a YAML Language Server `$schema` comment to enable editor autocomplete and validation without adding schema metadata to runtime config.
@@ -77,14 +77,14 @@ Each selected service is generated and deployed as its own Terraform root module
 Generated Terraform uses Terraform JSON syntax because it is safer for TypeScript to generate structured JSON than string-based HCL.
 
 ```text
-generated/<target>/<env>/<venture>/<service-name>/main.tf.json
+__generated__/<target>/<env>/<venture>/<service-name>/main.tf.json
 ```
 
 Example:
 
 ```text
-generated/aws/dev/venture/payment-api/main.tf.json
-generated/floci/dev/venture/customer-records/main.tf.json
+__generated__/aws/dev/venture/payment-api/main.tf.json
+__generated__/floci/dev/venture/customer-records/main.tf.json
 ```
 
 Each generated service folder is intended to have its own Terraform state, scoped by environment and service.
@@ -151,7 +151,7 @@ The platform supports `--target floci` for local AWS-compatible testing. Floci r
 IPv4 network CIDRs, zones, and ingress/egress flow intent are defined alongside the services for each environment, venture, and VPC:
 
 ```text
-services/<env>/<venture>/<vpc>/network.yaml
+infra/services/<env>/<venture>/<vpc>/network.yaml
 ```
 
 Services must live under a security zone that is defined in the matching network policy. The MVP validates zone existence and captures IPv4 CIDRs, subnets, flow intent, and explicit AWS endpoint intent. DynamoDB AWS flows require an explicit gateway VPC endpoint configuration. The MVP does not yet generate VPC subnets, security groups, route tables, or VPC endpoints from that policy.
