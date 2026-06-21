@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { generatedDirectoryForService } from "./generated-paths";
 import { discoverServices } from "./service-discovery";
+import { serviceTypeRegistry } from "./services";
 
 import type { DeployTarget } from "./terraform";
 
@@ -54,26 +55,10 @@ function compareDeployOrder(
   right: Awaited<ReturnType<typeof discoverServices>>[number],
 ): number {
   return (
-    serviceDeployPriority(left.metadata.serviceType) -
-      serviceDeployPriority(right.metadata.serviceType) ||
+    serviceTypeRegistry.get(left.metadata.serviceType).deployPriority -
+      serviceTypeRegistry.get(right.metadata.serviceType).deployPriority ||
     left.metadata.serviceName.localeCompare(right.metadata.serviceName)
   );
-}
-
-function serviceDeployPriority(serviceType: string): number {
-  if (serviceType === "dynamodb") {
-    return 0;
-  }
-
-  if (serviceType === "lambda") {
-    return 1;
-  }
-
-  if (serviceType === "ecs") {
-    return 2;
-  }
-
-  return 3;
 }
 
 function repoRoot(): string {

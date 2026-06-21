@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "yaml";
 import { validateServiceNetworkZones } from "./network-zones";
-import { apiGatewaySchema, dynamoDbSchema, ecsSchema, lambdaSchema } from "./schemas";
+import { serviceTypeRegistry } from "./services";
 import type { LoadedService, ServiceMetadata, ServiceType } from "./types";
 
 export type DiscoverOptions = {
@@ -75,32 +75,9 @@ async function listYamlFiles(directory: string): Promise<string[]> {
 async function loadService(filePath: string, servicesRoot: string): Promise<LoadedService> {
   const metadata = parseServicePath(filePath, servicesRoot);
   const raw = parse(await readFile(filePath, "utf8"));
-
-  if (metadata.serviceType === "lambda") {
-    return {
-      metadata: { ...metadata, serviceType: "lambda" },
-      config: lambdaSchema.parse(raw),
-    };
-  }
-
-  if (metadata.serviceType === "apigateway") {
-    return {
-      metadata: { ...metadata, serviceType: "apigateway" },
-      config: apiGatewaySchema.parse(raw),
-    };
-  }
-
-  if (metadata.serviceType === "ecs") {
-    return {
-      metadata: { ...metadata, serviceType: "ecs" },
-      config: ecsSchema.parse(raw),
-    };
-  }
-
-  return {
-    metadata: { ...metadata, serviceType: "dynamodb" },
-    config: dynamoDbSchema.parse(raw),
-  };
+  const config = serviceTypeRegistry.get(metadata.serviceType).schema.parse(raw);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- metadata.serviceType and the plugin's schema are paired by construction in the registry; parsed config matches the discriminated member
+  return { metadata, config } as LoadedService;
 }
 
 function parseServicePath(filePath: string, servicesRoot: string): ServiceMetadata {
@@ -114,7 +91,7 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
   }
 
   const [env, venture, vpc, securityZone, fileName] = parts;
-  const match = fileName.match(/^(.+)\.(lambda|dynamodb|apigateway|ecs)\.ya?ml$/);
+  const match = fileName.match(/^(.+)\.([^.]+)\.ya?ml$/);
 
   if (!match) {
     throw new Error(`Unsupported service file name: ${filePath}`);
@@ -135,8 +112,10 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
 }
 
 function parseServiceType(value: string, filePath: string): ServiceType {
-  if (value === "lambda" || value === "dynamodb" || value === "apigateway" || value === "ecs") {
-    return value;
+  const plugin = serviceTypeRegistry.forFileSuffix(value);
+
+  if (plugin) {
+    return plugin.type;
   }
 
   throw new Error(`Unsupported service type in ${filePath}: ${value}`);

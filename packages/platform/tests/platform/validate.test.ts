@@ -106,6 +106,55 @@ describe("validateConfigs", () => {
     ).toBe(true);
   });
 
+  test("reports API Gateway routes that reference unknown services", async () => {
+    const root = await createValidConfigTree();
+    const publicRoot = path.join(root, "infra", "services", "dev", "venture", "core", "public");
+    await mkdir(publicRoot, { recursive: true });
+    await writeFile(
+      path.join(publicRoot, "payments.apigateway.yaml"),
+      [
+        "description: Payments app public ingress.",
+        "routes:",
+        "  - path: /payments",
+        "    method: ANY",
+        "    target:",
+        "      type: ecs",
+        "      service: payments-app-typo",
+        "  - path: /api/payments",
+        "    method: POST",
+        "    target:",
+        "      type: lambda",
+        "      service: payment-api-typo",
+      ].join("\n"),
+    );
+
+    const result = await validateConfigs({
+      env: "dev",
+      venture: "venture",
+      servicesRoot: path.join(root, "infra", "services"),
+    });
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) =>
+        error.messages.some((message) =>
+          message.includes(
+            "routes[0].target.service references unknown ECS service payments-app-typo",
+          ),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      result.errors.some((error) =>
+        error.messages.some((message) =>
+          message.includes(
+            "routes[1].target.service references unknown Lambda service payment-api-typo",
+          ),
+        ),
+      ),
+    ).toBe(true);
+  });
+
   test("reports supported Fargate task sizes in terminal validation errors", async () => {
     const root = await createValidConfigTree();
     const publicRoot = path.join(root, "infra", "services", "dev", "venture", "core", "public");
@@ -175,6 +224,10 @@ async function createValidConfigTree(): Promise<string> {
       "    description: Application services that are not public.",
       "    subnets:",
       "      - 10.20.10.0/24",
+      "  public:",
+      "    description: Public application entrypoints.",
+      "    subnets:",
+      "      - 10.20.20.0/24",
       "flows:",
       "  - from: internal",
       "    to: aws",

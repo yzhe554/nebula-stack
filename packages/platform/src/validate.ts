@@ -4,9 +4,8 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { ZodError } from "zod";
 import { loadNetworkPolicy } from "./network-zones";
-import { apiGatewaySchema, dynamoDbSchema, ecsSchema, lambdaSchema } from "./schemas";
+import { serviceTypeRegistry } from "./services";
 import { discoverServices } from "./service-discovery";
-import type { LoadedService } from "./types";
 
 export type ValidationError = {
   file: string;
@@ -61,31 +60,16 @@ export async function validateConfigs(options: ValidateConfigsOptions): Promise<
 export function validateServiceReferences(
   services: Awaited<ReturnType<typeof discoverServices>>,
 ): void {
-  const dynamoDbServices = new Set(
-    services
-      .filter((service) => service.metadata.serviceType === "dynamodb")
-      .map((service) => service.metadata.serviceName),
+  const messages = services.flatMap(
+    (service) =>
+      serviceTypeRegistry
+        .get(service.metadata.serviceType)
+        .validateReferences?.(service, services) ?? [],
   );
 
-  for (const service of services) {
-    if (!isLambdaService(service)) {
-      continue;
-    }
-
-    service.config.permissions.dynamodb.forEach((permission, index) => {
-      if (!dynamoDbServices.has(permission.service)) {
-        throw new Error(
-          `permissions.dynamodb[${index}].service references unknown DynamoDB service ${permission.service} (${service.metadata.sourcePath})`,
-        );
-      }
-    });
+  if (messages.length > 0) {
+    throw new Error(messages.join("\n"));
   }
-}
-
-function isLambdaService(
-  service: LoadedService,
-): service is Extract<LoadedService, { metadata: { serviceType: "lambda" } }> {
-  return service.metadata.serviceType === "lambda";
 }
 
 export async function validateAllConfigs(
@@ -148,23 +132,10 @@ async function validateYamlFile(filePath: string, servicesRoot: string): Promise
     return;
   }
 
-  if (fileName.endsWith(".lambda.yaml") || fileName.endsWith(".lambda.yml")) {
-    lambdaSchema.parse(raw);
-    return;
-  }
-
-  if (fileName.endsWith(".dynamodb.yaml") || fileName.endsWith(".dynamodb.yml")) {
-    dynamoDbSchema.parse(raw);
-    return;
-  }
-
-  if (fileName.endsWith(".apigateway.yaml") || fileName.endsWith(".apigateway.yml")) {
-    apiGatewaySchema.parse(raw);
-    return;
-  }
-
-  if (fileName.endsWith(".ecs.yaml") || fileName.endsWith(".ecs.yml")) {
-    ecsSchema.parse(raw);
+  const match = fileName.match(/\.([^.]+)\.ya?ml$/);
+  const plugin = match ? serviceTypeRegistry.forFileSuffix(match[1]) : undefined;
+  if (plugin) {
+    plugin.schema.parse(raw);
     return;
   }
 

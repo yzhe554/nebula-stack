@@ -619,6 +619,39 @@ describe("terraformForService", () => {
     });
   });
 
+  test("requires ECS container ports for Floci API Gateway ECS targets", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-ingress",
+        serviceType: "apigateway",
+        sourcePath: "infra/services/dev/venture/core/public/docs-ingress.apigateway.yaml",
+      },
+      config: {
+        description: "Docs ingress",
+        routes: [
+          {
+            path: "/docs",
+            method: "ANY",
+            target: { type: "ecs", service: "docs-app" },
+          },
+        ],
+      },
+    };
+
+    expect(() =>
+      terraformForService(service, {
+        target: "floci",
+        serviceNames: {
+          "docs-app": "dev-venture-core-public-docs-app",
+        },
+      }),
+    ).toThrow("apigateway route references ECS service without container port docs-app");
+  });
+
   test("requires an AWS API Gateway domain certificate config", () => {
     const service = {
       metadata: {
@@ -758,6 +791,27 @@ describe("terraformForService", () => {
     expect(terraform.resource.aws_apigatewayv2_api_mapping).toBeUndefined();
     expect(terraform.resource.aws_route53_record).toBeUndefined();
     expect(terraform.data.aws_route53_zone).toBeUndefined();
+  });
+
+  test("dispatches every service type through the registry", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "managed",
+        serviceName: "customer-records",
+        serviceType: "dynamodb",
+        sourcePath: "infra/services/dev/venture/core/managed/customer-records.dynamodb.yaml",
+      },
+      config: {
+        billingMode: "PAY_PER_REQUEST",
+        hashKey: { name: "id", type: "S" },
+        pointInTimeRecovery: false,
+      },
+    };
+    const dynamo = terraformResult(terraformForService(service, { target: "aws" }));
+    expect(Object.keys(dynamo.resource)).toContain("aws_dynamodb_table");
   });
 
   test("injects local AWS endpoint URL for Floci Lambda deployments", () => {

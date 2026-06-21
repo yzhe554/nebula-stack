@@ -1,9 +1,6 @@
 import type { z } from "zod";
-import { apiGatewaySchema } from "../schemas/apigateway.schema";
-import { dynamoDbSchema } from "../schemas/dynamodb.schema";
-import { ecsSchema } from "../schemas/ecs.schema";
-import { lambdaSchema } from "../schemas/lambda.schema";
 import { networkPolicySchema } from "../schemas/network.schema";
+import { serviceTypeRegistry } from "./services";
 
 type JsonSchemaMetadata = { id: string; title: string; description: string };
 
@@ -25,50 +22,29 @@ export function generateSchemaObject(
   };
 }
 
-export function lambdaJsonSchema(): Record<string, unknown> {
-  return generateSchemaObject(lambdaSchema, {
-    id: "https://example.local/packages/platform/schemas/lambda.schema.json",
-    title: "Platform Lambda Service",
-    description: "YAML schema for AWS Lambda services deployed by the platform.",
-  });
-}
-
-export function dynamoDbJsonSchema(): Record<string, unknown> {
-  return generateSchemaObject(dynamoDbSchema, {
-    id: "https://example.local/packages/platform/schemas/dynamodb.schema.json",
-    title: "Platform DynamoDB Service",
-    description: "YAML schema for AWS DynamoDB tables deployed by the platform.",
-  });
+function idFor(fileName: string): string {
+  return `https://example.local/packages/platform/schemas/${fileName}`;
 }
 
 export function networkJsonSchema(): Record<string, unknown> {
   return generateSchemaObject(networkPolicySchema, {
-    id: "https://example.local/packages/platform/schemas/network.schema.json",
+    id: idFor("network.schema.json"),
     title: "Platform Network",
     description: "AWS-first IPv4 network intent for one env/venture/VPC.",
   });
 }
 
-export function apiGatewayJsonSchema(): Record<string, unknown> {
-  return generateSchemaObject(apiGatewaySchema, {
-    id: "https://example.local/packages/platform/schemas/apigateway.schema.json",
-    title: "Platform API Gateway Service",
-    description: "YAML schema for AWS API Gateway HTTP APIs deployed by the platform.",
-  });
-}
-
-export function ecsJsonSchema(): Record<string, unknown> {
-  return generateSchemaObject(ecsSchema, {
-    id: "https://example.local/packages/platform/schemas/ecs.schema.json",
-    title: "Platform ECS Service",
-    description: "YAML schema for AWS ECS services deployed by the platform.",
-  });
-}
-
-export const platformJsonSchemas = {
-  "lambda.schema.json": lambdaJsonSchema,
-  "dynamodb.schema.json": dynamoDbJsonSchema,
+export const platformJsonSchemas: Record<string, () => Record<string, unknown>> = {
+  ...Object.fromEntries(
+    serviceTypeRegistry.all().map((plugin) => [
+      plugin.jsonSchemaMetadata.fileName,
+      () =>
+        generateSchemaObject(plugin.schema, {
+          id: idFor(plugin.jsonSchemaMetadata.fileName),
+          title: plugin.jsonSchemaMetadata.title,
+          description: plugin.jsonSchemaMetadata.description,
+        }),
+    ]),
+  ),
   "network.schema.json": networkJsonSchema,
-  "apigateway.schema.json": apiGatewayJsonSchema,
-  "ecs.schema.json": ecsJsonSchema,
-} as const;
+};
