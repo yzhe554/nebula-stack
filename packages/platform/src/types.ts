@@ -1,4 +1,4 @@
-export type ServiceType = "lambda" | "dynamodb" | "apigateway" | "ecs";
+export type ServiceType = "lambda" | "dynamodb" | "apigateway" | "ecs" | "network";
 
 export type ServiceMetadata = {
   env: string;
@@ -130,6 +130,10 @@ export type LoadedService =
   | {
       metadata: ServiceMetadata & { serviceType: "ecs" };
       config: EcsConfig;
+    }
+  | {
+      metadata: ServiceMetadata & { serviceType: "network" };
+      config: NetworkPolicy;
     };
 
 export type NetworkFlow = {

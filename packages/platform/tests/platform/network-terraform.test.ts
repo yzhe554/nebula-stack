@@ -132,17 +132,17 @@ describe("terraformForNetwork – VPC + subnets", () => {
     expect(az["state"]).toBe("available");
   });
 
-  test("public_0 availability_zone references names[0]", () => {
+  test("public_0 availability_zone references names[0] (modulo AZ count)", () => {
     const subnet = resource(tf, "aws_subnet", "public_0");
     expect(subnet["availability_zone"]).toBe(
-      "${data.aws_availability_zones.available.names[0]}",
+      "${data.aws_availability_zones.available.names[0 % length(data.aws_availability_zones.available.names)]}",
     );
   });
 
-  test("public_1 availability_zone references names[1]", () => {
+  test("public_1 availability_zone references names[1] (modulo AZ count)", () => {
     const subnet = resource(tf, "aws_subnet", "public_1");
     expect(subnet["availability_zone"]).toBe(
-      "${data.aws_availability_zones.available.names[1]}",
+      "${data.aws_availability_zones.available.names[1 % length(data.aws_availability_zones.available.names)]}",
     );
   });
 });
@@ -159,17 +159,24 @@ describe("terraformForNetwork – routing", () => {
     expect(igw["vpc_id"]).toBe("${aws_vpc.network.id}");
   });
 
-  test("public route table has 0.0.0.0/0 route via IGW", () => {
-    const rt = resource(tf, "aws_route_table", "public");
-    expect(rt["route"]).toEqual([
-      { cidr_block: "0.0.0.0/0", gateway_id: "${aws_internet_gateway.network.id}" },
-    ]);
+  test("public internet route is a standalone aws_route on the public RT", () => {
+    const route = resource(tf, "aws_route", "public_internet");
+    expect(route).toEqual({
+      route_table_id: "${aws_route_table.public.id}",
+      destination_cidr_block: "0.0.0.0/0",
+      gateway_id: "${aws_internet_gateway.network.id}",
+    });
   });
 
-  test("internal route table exists and has NO 0.0.0.0/0 route", () => {
-    const rt = resource(tf, "aws_route_table", "internal");
-    // Our implementation omits the `route` key entirely for non-public zones.
-    expect(rt["route"]).toBeUndefined();
+  test("route tables carry no inline route blocks", () => {
+    expect(resource(tf, "aws_route_table", "public")["route"]).toBeUndefined();
+    expect(resource(tf, "aws_route_table", "internal")["route"]).toBeUndefined();
+  });
+
+  test("internal zone has NO aws_route to the internet", () => {
+    // Only the public zone gets an internet route; no internal_* internet route exists.
+    const routes = objectProperty(tf.resource, "aws_route");
+    expect(Object.keys(routes)).toEqual(["public_internet"]);
   });
 
   test("aws_route_table_association.public_0 points to public subnet and RT", () => {
@@ -234,6 +241,17 @@ describe("terraformForNetwork – security groups", () => {
       security_group_id: "${aws_security_group.internal.id}",
     });
   });
+
+  test("floci still emits the zone SGs but omits SG rules (Floci can't create source-SG rules)", () => {
+    const flociTf = terraformResult(terraformForNetwork(svc, { target: "floci" }));
+    // Security groups themselves are still present on floci.
+    expect(Object.keys(objectProperty(flociTf.resource, "aws_security_group")).sort()).toEqual([
+      "internal",
+      "public",
+    ]);
+    // But the rules (which reference source SGs) are omitted entirely.
+    expect(flociTf.resource["aws_security_group_rule"]).toBeUndefined();
+  });
 });
 
 describe("terraformForNetwork – flow logs", () => {
@@ -265,5 +283,13 @@ describe("terraformForNetwork – flow logs", () => {
     const policy = resource(tf, "aws_iam_role_policy", "flow_logs");
     expect(policy["name"]).toBe("dev-venture-core-flow-logs-policy");
     expect(policy["role"]).toBe("${aws_iam_role.flow_logs.id}");
+  });
+
+  test("omits flow logs for the floci target (LocalStack lacks CreateFlowLogs)", () => {
+    const flociTf = terraformResult(terraformForNetwork(svc, { target: "floci" }));
+    expect(flociTf.resource["aws_flow_log"]).toBeUndefined();
+    expect(flociTf.resource["aws_cloudwatch_log_group"]).toBeUndefined();
+    // The VPC itself is still emitted on floci.
+    expect(resource(flociTf, "aws_vpc", "network")["cidr_block"]).toBe("10.20.0.0/16");
   });
 });

@@ -1,6 +1,11 @@
 import path from "node:path";
 import { discoverServices, type DiscoverOptions } from "./service-discovery";
-import { ecsLoadBalancerName, physicalName, targetGroupNamePrefix, terraformName } from "./terraform/naming";
+import {
+  ecsLoadBalancerName,
+  physicalName,
+  targetGroupNamePrefix,
+  terraformName,
+} from "./terraform/naming";
 import type { ApiGatewayRoute, LoadedService } from "./types";
 import { deriveAppNames, validateAppExists, type AppNames } from "./app-derivation";
 
@@ -42,7 +47,11 @@ function targetedServiceNames(route: ApiGatewayRoute): string[] {
   const allTargets = [route.target, ...Object.values(route.targets ?? {})];
   const names: string[] = [];
   for (const target of allTargets) {
-    if ((target.type === "ecs" || target.type === "lambda") && "service" in target && target.service !== undefined) {
+    if (
+      (target.type === "ecs" || target.type === "lambda") &&
+      "service" in target &&
+      target.service !== undefined
+    ) {
       names.push(target.service);
     }
   }
@@ -103,7 +112,9 @@ export function serviceNamesFromManifest(manifest: ServiceManifestEntry[]): Reco
   );
 }
 
-export function serviceContainerPortsFromManifest(manifest: ServiceManifestEntry[]): Record<string, number> {
+export function serviceContainerPortsFromManifest(
+  manifest: ServiceManifestEntry[],
+): Record<string, number> {
   return Object.fromEntries(
     manifest
       .filter((entry): entry is ServiceManifestEntry & { ecs: EcsNames } => entry.ecs !== undefined)
@@ -111,7 +122,10 @@ export function serviceContainerPortsFromManifest(manifest: ServiceManifestEntry
   );
 }
 
-export function buildServiceManifest(services: LoadedService[], repoRoot: string = defaultRepoRoot): ServiceManifestEntry[] {
+export function buildServiceManifest(
+  services: LoadedService[],
+  repoRoot: string = defaultRepoRoot,
+): ServiceManifestEntry[] {
   const fronting = gatewayFrontingByService(services);
   return services.map((service) => {
     const app = appMetadataFor(service, repoRoot);
@@ -120,7 +134,9 @@ export function buildServiceManifest(services: LoadedService[], repoRoot: string
       metadata: service.metadata,
       physicalName: physicalName(service.metadata),
       ...(isEcsService(service) ? { ecs: ecsNamesFor(service) } : {}),
-      ...(fronting.has(service.metadata.serviceName) ? { frontedByGateway: fronting.get(service.metadata.serviceName) } : {}),
+      ...(fronting.has(service.metadata.serviceName)
+        ? { frontedByGateway: fronting.get(service.metadata.serviceName) }
+        : {}),
       ...(app ? { app } : {}),
     };
   });

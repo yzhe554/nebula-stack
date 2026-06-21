@@ -34,6 +34,10 @@ export async function validateServiceNetworkZones(
   const policyCache = new Map<string, NetworkPolicy>();
 
   for (const service of services) {
+    if (service.serviceType === "network") {
+      continue;
+    }
+
     const key = [service.env, service.venture, service.vpc].join("/");
     let policy = policyCache.get(key);
 

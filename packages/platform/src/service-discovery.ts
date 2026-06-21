@@ -57,11 +57,7 @@ async function listYamlFiles(directory: string): Promise<string[]> {
         return listYamlFiles(entryPath);
       }
 
-      if (
-        entry.isFile() &&
-        entry.name !== "network.yaml" &&
-        (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))
-      ) {
+      if (entry.isFile() && (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml"))) {
         return [entryPath];
       }
 
@@ -83,6 +79,19 @@ async function loadService(filePath: string, servicesRoot: string): Promise<Load
 function parseServicePath(filePath: string, servicesRoot: string): ServiceMetadata {
   const relative = path.relative(servicesRoot, filePath);
   const parts = relative.split(path.sep);
+
+  if (parts.length === 4 && parts[3] === "network.yaml") {
+    const [env, venture, vpc] = parts;
+    return {
+      env,
+      venture,
+      vpc,
+      securityZone: "network",
+      serviceName: "network",
+      serviceType: "network",
+      sourcePath: filePath,
+    };
+  }
 
   if (parts.length !== 5) {
     throw new Error(

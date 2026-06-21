@@ -9,4 +9,13 @@ describe("deploy priority", () => {
     expect(priority("lambda")).toBeLessThan(priority("ecs"));
     expect(priority("ecs")).toBeLessThan(priority("apigateway"));
   });
+
+  test("network deploys before all other service types", () => {
+    const priority = (t: "network" | "dynamodb" | "lambda" | "ecs" | "apigateway") =>
+      serviceTypeRegistry.get(t).deployPriority;
+    expect(priority("network")).toBeLessThan(priority("dynamodb"));
+    expect(priority("network")).toBeLessThan(priority("lambda"));
+    expect(priority("network")).toBeLessThan(priority("ecs"));
+    expect(priority("network")).toBeLessThan(priority("apigateway"));
+  });
 });

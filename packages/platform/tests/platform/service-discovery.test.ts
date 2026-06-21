@@ -115,8 +115,8 @@ describe("discoverServices", () => {
 
     const services = await discoverServices({ env: "dev", venture: "venture", servicesRoot });
 
-    expect(services).toHaveLength(1);
-    expect(services[0]).toMatchObject({
+    const apiGateway = services.find((service) => service.metadata.serviceType === "apigateway");
+    expect(apiGateway).toMatchObject({
       metadata: {
         serviceName: "docs",
         serviceType: "apigateway",
@@ -180,8 +180,8 @@ describe("discoverServices", () => {
 
     const services = await discoverServices({ env: "dev", venture: "venture", servicesRoot });
 
-    expect(services).toHaveLength(1);
-    expect(services[0]).toMatchObject({
+    const ecs = services.find((service) => service.metadata.serviceType === "ecs");
+    expect(ecs).toMatchObject({
       metadata: {
         serviceName: "docs",
         serviceType: "ecs",
@@ -204,6 +204,42 @@ describe("discoverServices", () => {
         task: { cpu: 256, memoryMb: 512 },
         image: { repository: "docs", tag: "local" },
         healthCheck: { path: "/docs" },
+      },
+    });
+  });
+
+  test("discovers network.yaml as a network service", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "platform-services-"));
+    const servicesRoot = path.join(root, "services");
+    await mkdir(path.join(servicesRoot, "dev", "venture", "core"), { recursive: true });
+
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "network.yaml"),
+      [
+        "cidrs:",
+        "  ipv4:",
+        "    vpc: 10.20.0.0/16",
+        "zones:",
+        "  internal:",
+        "    description: Internal services.",
+        "    subnets:",
+        "      - 10.20.10.0/24",
+        "flows: []",
+        "awsEndpoints: {}",
+      ].join("\n"),
+    );
+
+    const services = await discoverServices({ env: "dev", venture: "venture", servicesRoot });
+
+    expect(services).toHaveLength(1);
+    expect(services[0]).toMatchObject({
+      metadata: {
+        serviceName: "network",
+        serviceType: "network",
+        vpc: "core",
+      },
+      config: {
+        cidrs: { ipv4: { vpc: "10.20.0.0/16" } },
       },
     });
   });

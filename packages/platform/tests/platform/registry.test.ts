@@ -10,17 +10,29 @@ import type { LoadedService } from "../../src/types";
 
 const dynamoService: LoadedService = {
   metadata: {
-    env: "dev", venture: "venture", vpc: "core", securityZone: "managed",
-    serviceName: "customer-records", serviceType: "dynamodb",
+    env: "dev",
+    venture: "venture",
+    vpc: "core",
+    securityZone: "managed",
+    serviceName: "customer-records",
+    serviceType: "dynamodb",
     sourcePath: "infra/services/dev/venture/core/managed/customer-records.dynamodb.yaml",
   },
-  config: { billingMode: "PAY_PER_REQUEST", hashKey: { name: "id", type: "S" }, pointInTimeRecovery: false },
+  config: {
+    billingMode: "PAY_PER_REQUEST",
+    hashKey: { name: "id", type: "S" },
+    pointInTimeRecovery: false,
+  },
 };
 
 const ecsService: LoadedService = {
   metadata: {
-    env: "dev", venture: "venture", vpc: "core", securityZone: "public",
-    serviceName: "payments-app", serviceType: "ecs",
+    env: "dev",
+    venture: "venture",
+    vpc: "core",
+    securityZone: "public",
+    serviceName: "payments-app",
+    serviceType: "ecs",
     sourcePath: "infra/services/dev/venture/core/public/payments-app.ecs.yaml",
   },
   config: {
@@ -60,13 +72,19 @@ describe("buildServiceManifest", () => {
   test("computes docs-app target group prefix as docsa-", () => {
     const docsApp: LoadedService = {
       metadata: {
-        env: "dev", venture: "venture", vpc: "core", securityZone: "public",
-        serviceName: "docs-app", serviceType: "ecs",
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-app",
+        serviceType: "ecs",
         sourcePath: "infra/services/dev/venture/core/public/docs-app.ecs.yaml",
       },
       config: {
-        cluster: { capacity: "fargate" }, service: { desiredCount: 1, containerPort: 3001 },
-        task: { cpu: 256, memoryMb: 512 }, image: { repository: "nebula-docs", tag: "local" },
+        cluster: { capacity: "fargate" },
+        service: { desiredCount: 1, containerPort: 3001 },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "nebula-docs", tag: "local" },
         healthCheck: { path: "/docs" },
       },
     };
@@ -77,28 +95,44 @@ describe("buildServiceManifest", () => {
 
   const docsGateway: LoadedService = {
     metadata: {
-      env: "dev", venture: "venture", vpc: "core", securityZone: "public",
-      serviceName: "docs", serviceType: "apigateway",
+      env: "dev",
+      venture: "venture",
+      vpc: "core",
+      securityZone: "public",
+      serviceName: "docs",
+      serviceType: "apigateway",
       sourcePath: "infra/services/dev/venture/core/public/docs.apigateway.yaml",
     },
     config: {
       description: "Docs app ingress.",
       routes: [
-        { path: "/docs", method: "ANY",
+        {
+          path: "/docs",
+          method: "ANY",
           target: { type: "http_proxy", uri: "http://host.docker.internal:3001/docs" },
-          targets: { floci: { type: "ecs", service: "docs-app" }, aws: { type: "ecs", service: "docs-app" } } },
+          targets: {
+            floci: { type: "ecs", service: "docs-app" },
+            aws: { type: "ecs", service: "docs-app" },
+          },
+        },
       ],
     },
   };
   const docsAppForGateway: LoadedService = {
     metadata: {
-      env: "dev", venture: "venture", vpc: "core", securityZone: "public",
-      serviceName: "docs-app", serviceType: "ecs",
+      env: "dev",
+      venture: "venture",
+      vpc: "core",
+      securityZone: "public",
+      serviceName: "docs-app",
+      serviceType: "ecs",
       sourcePath: "infra/services/dev/venture/core/public/docs-app.ecs.yaml",
     },
     config: {
-      cluster: { capacity: "fargate" }, service: { desiredCount: 1, containerPort: 3001 },
-      task: { cpu: 256, memoryMb: 512 }, image: { repository: "nebula-docs", tag: "local" },
+      cluster: { capacity: "fargate" },
+      service: { desiredCount: 1, containerPort: 3001 },
+      task: { cpu: 256, memoryMb: 512 },
+      image: { repository: "nebula-docs", tag: "local" },
       healthCheck: { path: "/docs" },
     },
   };
@@ -106,22 +140,34 @@ describe("buildServiceManifest", () => {
   test("links an ecs service to the gateway that fronts it (via targets map)", () => {
     const manifest = buildServiceManifest([docsAppForGateway, docsGateway]);
     expect(manifest.find((e) => e.metadata.serviceName === "docs-app")?.frontedByGateway).toEqual({
-      serviceName: "docs", physicalName: "dev-venture-core-public-docs",
+      serviceName: "docs",
+      physicalName: "dev-venture-core-public-docs",
     });
   });
 
   test("links via a route's top-level target too", () => {
     const paymentsGateway: LoadedService = {
       metadata: {
-        env: "dev", venture: "venture", vpc: "core", securityZone: "public",
-        serviceName: "payments", serviceType: "apigateway",
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "payments",
+        serviceType: "apigateway",
         sourcePath: "infra/services/dev/venture/core/public/payments.apigateway.yaml",
       },
-      config: { description: "Payments app public ingress.",
-        routes: [{ path: "/payments", method: "ANY", target: { type: "ecs", service: "payments-app" } }] },
+      config: {
+        description: "Payments app public ingress.",
+        routes: [
+          { path: "/payments", method: "ANY", target: { type: "ecs", service: "payments-app" } },
+        ],
+      },
     };
     const manifest = buildServiceManifest([ecsService, paymentsGateway]);
-    expect(manifest.find((e) => e.metadata.serviceName === "payments-app")?.frontedByGateway?.serviceName).toBe("payments");
+    expect(
+      manifest.find((e) => e.metadata.serviceName === "payments-app")?.frontedByGateway
+        ?.serviceName,
+    ).toBe("payments");
   });
 
   test("serviceNamesFromManifest maps dynamodb/lambda/ecs names to physical names", () => {
@@ -140,8 +186,11 @@ describe("buildServiceManifest", () => {
   test("attaches derived app metadata to ecs services with dev port", () => {
     const [entry] = buildServiceManifest([ecsService]);
     expect(entry.app).toMatchObject({
-      base: "payments", dir: "apps/payments", packageName: "@repo/payments",
-      dockerfile: "apps/Dockerfile", devPort: 3002,
+      base: "payments",
+      dir: "apps/payments",
+      packageName: "@repo/payments",
+      dockerfile: "apps/Dockerfile",
+      devPort: 3002,
     });
   });
   test("does not attach app metadata to dynamodb services", () => {

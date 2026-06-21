@@ -7,7 +7,10 @@ const repoRoot = path.resolve(import.meta.dirname, "../../../..");
 describe("deriveAppNames", () => {
   test("strips a trailing -app to get the app base", () => {
     expect(deriveAppNames("docs-app")).toEqual({
-      base: "docs", dir: "apps/docs", packageName: "@repo/docs", dockerfile: "apps/Dockerfile",
+      base: "docs",
+      dir: "apps/docs",
+      packageName: "@repo/docs",
+      dockerfile: "apps/Dockerfile",
     });
   });
   test("handles payments-app", () => {
@@ -16,7 +19,10 @@ describe("deriveAppNames", () => {
   });
   test("leaves a name without -app suffix unchanged (lambda app)", () => {
     expect(deriveAppNames("payment-api")).toEqual({
-      base: "payment-api", dir: "apps/payment-api", packageName: "@repo/payment-api", dockerfile: "apps/Dockerfile",
+      base: "payment-api",
+      dir: "apps/payment-api",
+      packageName: "@repo/payment-api",
+      dockerfile: "apps/Dockerfile",
     });
   });
   test("only strips a SINGLE trailing -app", () => {
@@ -29,5 +35,7 @@ test("validateAppExists passes for a real app (docs)", () => {
   expect(() => validateAppExists(deriveAppNames("docs-app"), repoRoot)).not.toThrow();
 });
 test("validateAppExists throws for a non-existent app", () => {
-  expect(() => validateAppExists(deriveAppNames("ghost-app"), repoRoot)).toThrow(/app directory not found/i);
+  expect(() => validateAppExists(deriveAppNames("ghost-app"), repoRoot)).toThrow(
+    /app directory not found/i,
+  );
 });
