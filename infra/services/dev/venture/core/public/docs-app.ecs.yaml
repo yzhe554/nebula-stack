@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../../../../packages/platform/schemas/ecs.schema.json
+cluster:
+  capacity: fargate
+service:
+  desiredCount: 1
+  containerPort: 3001
+  autoscaling:
+    minCount: 1
+    maxCount: 2
+    targetCpuUtilization: 60
+    targetMemoryUtilization: 70
+task:
+  cpu: 256
+  memoryMb: 512
+image:
+  repository: nebula-docs
+  tag: local
+healthCheck:
+  path: /docs

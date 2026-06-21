@@ -106,6 +106,47 @@ describe("validateConfigs", () => {
     ).toBe(true);
   });
 
+  test("reports supported Fargate task sizes in terminal validation errors", async () => {
+    const root = await createValidConfigTree();
+    const publicRoot = path.join(root, "infra", "services", "dev", "venture", "core", "public");
+    await mkdir(publicRoot, { recursive: true });
+    await writeFile(
+      path.join(publicRoot, "docs-app.ecs.yaml"),
+      [
+        "cluster:",
+        "  capacity: fargate",
+        "service:",
+        "  desiredCount: 1",
+        "  containerPort: 3001",
+        "task:",
+        "  cpu: 256",
+        "  memoryMb: 4096",
+        "image:",
+        "  repository: nebula-docs",
+        "  tag: local",
+        "healthCheck:",
+        "  path: /docs",
+      ].join("\n"),
+    );
+
+    const result = await validateConfigs({
+      env: "dev",
+      venture: "venture",
+      servicesRoot: path.join(root, "infra", "services"),
+    });
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some(
+        (error) =>
+          error.file.endsWith("docs-app.ecs.yaml") &&
+          error.messages.includes(
+            "task.memoryMb: 4096 is not valid for Fargate task.cpu 256. Supported memoryMb values: 512, 1024, 2048.",
+          ),
+      ),
+    ).toBe(true);
+  });
+
   test("validates every env and venture when no scope is provided", async () => {
     const root = await createValidConfigTree();
 

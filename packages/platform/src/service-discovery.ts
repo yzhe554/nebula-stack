@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "yaml";
 import { validateServiceNetworkZones } from "./network-zones";
-import { apiGatewaySchema, dynamoDbSchema, lambdaSchema } from "./schemas";
+import { apiGatewaySchema, dynamoDbSchema, ecsSchema, lambdaSchema } from "./schemas";
 import type { LoadedService, ServiceMetadata, ServiceType } from "./types";
 
 export type DiscoverOptions = {
@@ -90,6 +90,13 @@ async function loadService(filePath: string, servicesRoot: string): Promise<Load
     };
   }
 
+  if (metadata.serviceType === "ecs") {
+    return {
+      metadata: { ...metadata, serviceType: "ecs" },
+      config: ecsSchema.parse(raw),
+    };
+  }
+
   return {
     metadata: { ...metadata, serviceType: "dynamodb" },
     config: dynamoDbSchema.parse(raw),
@@ -107,7 +114,7 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
   }
 
   const [env, venture, vpc, securityZone, fileName] = parts;
-  const match = fileName.match(/^(.+)\.(lambda|dynamodb|apigateway)\.ya?ml$/);
+  const match = fileName.match(/^(.+)\.(lambda|dynamodb|apigateway|ecs)\.ya?ml$/);
 
   if (!match) {
     throw new Error(`Unsupported service file name: ${filePath}`);
@@ -128,7 +135,7 @@ function parseServicePath(filePath: string, servicesRoot: string): ServiceMetada
 }
 
 function parseServiceType(value: string, filePath: string): ServiceType {
-  if (value === "lambda" || value === "dynamodb" || value === "apigateway") {
+  if (value === "lambda" || value === "dynamodb" || value === "apigateway" || value === "ecs") {
     return value;
   }
 

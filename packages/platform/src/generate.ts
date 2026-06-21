@@ -48,7 +48,9 @@ function serviceNamesFor(
     loadedServices
       .filter(
         (service) =>
-          service.metadata.serviceType === "dynamodb" || service.metadata.serviceType === "lambda",
+          service.metadata.serviceType === "dynamodb" ||
+          service.metadata.serviceType === "lambda" ||
+          service.metadata.serviceType === "ecs",
       )
       .map((service) => [service.metadata.serviceName, physicalName(service.metadata)]),
   );

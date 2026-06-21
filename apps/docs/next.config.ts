@@ -6,6 +6,7 @@ const assetPrefix = gatewayPath ? `${gatewayPath}${docsBasePath}` : undefined;
 
 const nextConfig: NextConfig = {
   basePath: docsBasePath,
+  output: "standalone",
   ...(assetPrefix ? { assetPrefix } : {}),
   async rewrites() {
     if (!gatewayPath) {

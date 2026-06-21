@@ -15,8 +15,22 @@ routes:
     target:
       type: http_proxy
       uri: http://host.docker.internal:3001/docs
+    targets:
+      floci:
+        type: ecs
+        service: docs-app
+      aws:
+        type: ecs
+        service: docs-app
   - path: /docs/{proxy+}
     method: ANY
     target:
       type: http_proxy
       uri: http://host.docker.internal:3001/docs/{proxy}
+    targets:
+      floci:
+        type: ecs
+        service: docs-app
+      aws:
+        type: ecs
+        service: docs-app

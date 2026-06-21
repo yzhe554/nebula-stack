@@ -5,6 +5,7 @@ DOCS_API_NAME="dev-venture-core-public-docs"
 PAYMENT_API_NAME="dev-venture-core-internal-payment-api-ingress"
 ENDPOINT_URL="http://localhost:4566"
 DOCS_STATE_DIR="infra/services/dev/venture/core/public/__generated__/floci/docs"
+DOCS_APP_STATE_DIR="infra/services/dev/venture/core/public/__generated__/floci/docs-app"
 PAYMENT_API_STATE_DIR="infra/services/dev/venture/core/internal/__generated__/floci/payment-api-ingress"
 
 docs_api_id="$(AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
@@ -29,31 +30,71 @@ if [[ -z "$payment_api_id" || "$payment_api_id" == "None" ]]; then
   fi
 fi
 
-if [[ -z "$docs_api_id" || "$docs_api_id" == "None" ]]; then
-  echo "API Gateway not found: $DOCS_API_NAME" >&2
-  echo "Run: pnpm floci:deploy:all" >&2
-  exit 1
+docs_alb_dns=""
+if [[ -f "$DOCS_APP_STATE_DIR/terraform.tfstate" ]]; then
+  docs_alb_dns="$(jq -r '.resources[] | select(.type == "aws_lb" and .name == "docs_app") | .instances[0].attributes.dns_name // empty' "$DOCS_APP_STATE_DIR/terraform.tfstate" 2>/dev/null || true)"
 fi
 
-if [[ -z "$payment_api_id" || "$payment_api_id" == "None" ]]; then
-  echo "API Gateway not found: $PAYMENT_API_NAME" >&2
-  echo "Run: pnpm floci:deploy:all" >&2
-  exit 1
-fi
+echo "Floci URLs"
+echo "=========="
+echo
 
-docs_gateway_path="/execute-api/$docs_api_id/\$default"
-payment_gateway_path="/execute-api/$payment_api_id/\$default"
-
-cat <<URLS
-Docs via Floci:
+if [[ -n "$docs_api_id" && "$docs_api_id" != "None" ]]; then
+  docs_gateway_path="/execute-api/$docs_api_id/\$default"
+  cat <<URLS
+Docs via API Gateway:
 $ENDPOINT_URL$docs_gateway_path/docs
 
-Payment API via Floci:
-$ENDPOINT_URL$payment_gateway_path/api/payments
+Docs API Gateway base:
+$ENDPOINT_URL$docs_gateway_path
 
-Docs direct:
+URLS
+else
+  cat <<URLS
+Docs via API Gateway:
+Not deployed. Run:
+pnpm platform:deploy -- --env dev --venture venture --target floci --services docs-app,docs
+
+URLS
+fi
+
+if [[ -n "$docs_alb_dns" && "$docs_alb_dns" != "null" ]]; then
+  cat <<URLS
+Docs via ALB (inside Floci container network; not directly host-accessible):
+http://$docs_alb_dns/docs
+
+URLS
+fi
+
+cat <<URLS
+Docs ECS container direct (inside Floci container network; not directly host-accessible):
+http://dev-venture-core-public-docs-app.floci.localhost:3001/docs
+
+Docs local dev direct:
 http://localhost:3001/docs
 
-For static assets through Floci, start docs with:
+URLS
+
+if [[ -n "$payment_api_id" && "$payment_api_id" != "None" ]]; then
+  payment_gateway_path="/execute-api/$payment_api_id/\$default"
+  cat <<URLS
+Payment API via API Gateway:
+$ENDPOINT_URL$payment_gateway_path/api/payments
+
+URLS
+else
+  cat <<URLS
+Payment API via API Gateway:
+Not deployed. Run full stack deploy if needed:
+pnpm floci:deploy:all
+
+URLS
+fi
+
+cat <<URLS
+For local dev proxy mode, start docs with:
 pnpm docs:dev:floci
+
+For Floci docs deployment, run:
+pnpm floci:deploy:docs
 URLS

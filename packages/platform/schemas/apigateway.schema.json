@@ -36,7 +36,9 @@
                       "description": "Explicit ACM certificate ARN for this API Gateway custom domain."
                     }
                   },
-                  "required": ["arn"],
+                  "required": [
+                    "arn"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -48,14 +50,19 @@
                       "description": "Domain name to use when looking up an ISSUED ACM certificate, such as *.dev.example.com."
                     }
                   },
-                  "required": ["lookupDomain"],
+                  "required": [
+                    "lookupDomain"
+                  ],
                   "additionalProperties": false
                 }
               ],
               "description": "ACM certificate config for AWS API Gateway custom domains. Use arn for explicit references or lookupDomain to find an existing issued certificate."
             }
           },
-          "required": ["name", "zoneName"],
+          "required": [
+            "name",
+            "zoneName"
+          ],
           "additionalProperties": false
         },
         "aws": {
@@ -83,7 +90,9 @@
                       "description": "Explicit ACM certificate ARN for this API Gateway custom domain."
                     }
                   },
-                  "required": ["arn"],
+                  "required": [
+                    "arn"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -95,14 +104,19 @@
                       "description": "Domain name to use when looking up an ISSUED ACM certificate, such as *.dev.example.com."
                     }
                   },
-                  "required": ["lookupDomain"],
+                  "required": [
+                    "lookupDomain"
+                  ],
                   "additionalProperties": false
                 }
               ],
               "description": "ACM certificate config for AWS API Gateway custom domains. Use arn for explicit references or lookupDomain to find an existing issued certificate."
             }
           },
-          "required": ["name", "zoneName"],
+          "required": [
+            "name",
+            "zoneName"
+          ],
           "additionalProperties": false
         }
       },
@@ -121,7 +135,16 @@
           },
           "method": {
             "type": "string",
-            "enum": ["ANY", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+            "enum": [
+              "ANY",
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "HEAD"
+            ]
           },
           "target": {
             "oneOf": [
@@ -137,7 +160,10 @@
                     "format": "uri"
                   }
                 },
-                "required": ["type", "uri"],
+                "required": [
+                  "type",
+                  "uri"
+                ],
                 "additionalProperties": false
               },
               {
@@ -152,19 +178,168 @@
                     "minLength": 1
                   }
                 },
-                "required": ["type", "service"],
+                "required": [
+                  "type",
+                  "service"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "ecs"
+                  },
+                  "service": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "service"
+                ],
                 "additionalProperties": false
               }
             ]
+          },
+          "targets": {
+            "type": "object",
+            "properties": {
+              "floci": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "http_proxy"
+                      },
+                      "uri": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "uri"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "lambda"
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "service"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "ecs"
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "service"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "aws": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "http_proxy"
+                      },
+                      "uri": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "uri"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "lambda"
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "service"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "ecs"
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "service"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
           }
         },
-        "required": ["path", "method", "target"],
+        "required": [
+          "path",
+          "method",
+          "target"
+        ],
         "additionalProperties": false
       },
       "description": "HTTP API routes and their integration targets."
     }
   },
-  "required": ["routes"],
+  "required": [
+    "routes"
+  ],
   "additionalProperties": false,
   "$id": "https://example.local/packages/platform/schemas/apigateway.schema.json",
   "title": "Platform API Gateway Service",

@@ -1,0 +1,16 @@
+.git
+**/.next
+!apps/docs/.next
+!apps/docs/.next/standalone
+!apps/docs/.next/static
+!apps/docs/.next/static/**
+**/.turbo
+**/node_modules
+**/dist
+**/dist-ts
+**/__generated__
+.terraform-plugin-cache
+.terraform-provider-mirror
+.terraformrc.local
+.env.local
+!apps/docs/.next/standalone/**

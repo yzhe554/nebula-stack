@@ -134,6 +134,80 @@ describe("discoverServices", () => {
     });
   });
 
+  test("discovers ECS services", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "platform-services-"));
+    const servicesRoot = path.join(root, "services");
+    await mkdir(path.join(servicesRoot, "dev", "venture", "core", "public"), { recursive: true });
+
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "public", "docs.ecs.yaml"),
+      [
+        "cluster:",
+        "  capacity: fargate",
+        "service:",
+        "  desiredCount: 1",
+        "  containerPort: 3001",
+        "  autoscaling:",
+        "    minCount: 1",
+        "    maxCount: 2",
+        "    targetCpuUtilization: 60",
+        "    targetMemoryUtilization: 70",
+        "task:",
+        "  cpu: 256",
+        "  memoryMb: 512",
+        "image:",
+        "  repository: docs",
+        "  tag: local",
+        "healthCheck:",
+        "  path: /docs",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(servicesRoot, "dev", "venture", "core", "network.yaml"),
+      [
+        "cidrs:",
+        "  ipv4:",
+        "    vpc: 10.20.0.0/16",
+        "zones:",
+        "  public:",
+        "    description: Public ingress services.",
+        "    subnets:",
+        "      - 10.20.1.0/24",
+        "flows: []",
+        "awsEndpoints: {}",
+      ].join("\n"),
+    );
+
+    const services = await discoverServices({ env: "dev", venture: "venture", servicesRoot });
+
+    expect(services).toHaveLength(1);
+    expect(services[0]).toMatchObject({
+      metadata: {
+        serviceName: "docs",
+        serviceType: "ecs",
+        securityZone: "public",
+      },
+      config: {
+        cluster: {
+          capacity: "fargate",
+        },
+        service: {
+          desiredCount: 1,
+          containerPort: 3001,
+          autoscaling: {
+            minCount: 1,
+            maxCount: 2,
+            targetCpuUtilization: 60,
+            targetMemoryUtilization: 70,
+          },
+        },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "docs", tag: "local" },
+        healthCheck: { path: "/docs" },
+      },
+    });
+  });
+
   test("rejects duplicate service names within the same environment", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "platform-services-"));
     const servicesRoot = path.join(root, "services");

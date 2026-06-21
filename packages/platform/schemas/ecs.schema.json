@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "cluster": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "capacity": {
+              "type": "string",
+              "const": "ec2"
+            },
+            "instanceType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "desiredCapacity": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "autoscaling": {
+              "description": "Optional EC2 Auto Scaling Group capacity bounds for ECS-on-EC2.",
+              "type": "object",
+              "properties": {
+                "minCapacity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maxCapacity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "minCapacity",
+                "maxCapacity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "capacity",
+            "instanceType",
+            "desiredCapacity"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "capacity": {
+              "type": "string",
+              "const": "fargate"
+            }
+          },
+          "required": [
+            "capacity"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "desiredCount": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "containerPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "autoscaling": {
+          "description": "Optional ECS service autoscaling for task count.",
+          "type": "object",
+          "properties": {
+            "minCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxCount": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "targetCpuUtilization": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "targetMemoryUtilization": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "minCount",
+            "maxCount"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "desiredCount",
+        "containerPort"
+      ],
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "cpu": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 1024,
+          "description": "ECS task CPU units. 1024 CPU units = 1 vCPU. Keep Node.js services at or below 1024 unless the platform policy changes."
+        },
+        "memoryMb": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "description": "ECS task memory in MiB, such as 512 or 1024."
+        }
+      },
+      "required": [
+        "cpu",
+        "memoryMb"
+      ],
+      "additionalProperties": false
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "repository",
+        "tag"
+      ],
+      "additionalProperties": false
+    },
+    "healthCheck": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\/.*"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "cluster",
+    "service",
+    "task",
+    "image",
+    "healthCheck"
+  ],
+  "additionalProperties": false,
+  "$id": "https://example.local/packages/platform/schemas/ecs.schema.json",
+  "title": "Platform ECS Service",
+  "description": "YAML schema for AWS ECS services deployed by the platform."
+}

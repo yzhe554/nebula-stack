@@ -21,10 +21,28 @@ const lambdaTargetSchema = z.object({
   service: z.string().min(1),
 });
 
+const ecsTargetSchema = z.object({
+  type: z.literal("ecs"),
+  service: z.string().min(1),
+});
+
+const routeTargetSchema = z.discriminatedUnion("type", [
+  httpProxyTargetSchema,
+  lambdaTargetSchema,
+  ecsTargetSchema,
+]);
+
 export const apiGatewayRouteSchema = z.object({
   path: z.string().min(1).startsWith("/"),
   method: z.enum(apiGatewayRouteMethodValues),
-  target: z.discriminatedUnion("type", [httpProxyTargetSchema, lambdaTargetSchema]),
+  target: routeTargetSchema,
+  targets: z
+    .object({
+      floci: routeTargetSchema.optional(),
+      aws: routeTargetSchema.optional(),
+    })
+    .strict()
+    .optional(),
 });
 
 export const apiGatewayCertificateSchema = z

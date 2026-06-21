@@ -1,5 +1,10 @@
 import path from "node:path";
-import type { ApiGatewayRoute, LoadedService, ServiceMetadata } from "./types";
+import type {
+  ApiGatewayRoute,
+  ApiGatewayRouteTarget,
+  LoadedService,
+  ServiceMetadata,
+} from "./types";
 
 export type TerraformJson = Record<string, unknown>;
 export type DeployTarget = "aws" | "floci";
@@ -11,9 +16,15 @@ export type TerraformOptions = {
   domainCertificateArns?: Record<string, string>;
 };
 
-type ApiGatewayLambdaRoute = ApiGatewayRoute & {
-  target: Extract<ApiGatewayRoute["target"], { type: "lambda" }>;
+type ResolvedApiGatewayRoute = ApiGatewayRoute & { resolvedTarget: ApiGatewayRouteTarget };
+type ResolvedLambdaRoute = ResolvedApiGatewayRoute & {
+  resolvedTarget: Extract<ApiGatewayRouteTarget, { type: "lambda" }>;
 };
+type ResolvedEcsRoute = ResolvedApiGatewayRoute & {
+  resolvedTarget: Extract<ApiGatewayRouteTarget, { type: "ecs" }>;
+};
+
+type EcsService = Extract<LoadedService, { metadata: { serviceType: "ecs" } }>;
 
 const flociEndpointUrl = "http://localhost.floci.io:4566";
 const awsRegion = "ap-southeast-2";
@@ -31,6 +42,10 @@ export function terraformForService(
     return terraformForApiGateway(service, options);
   }
 
+  if (isEcsService(service)) {
+    return terraformForEcs(service, options);
+  }
+
   return terraformForDynamoDb(service, options);
 }
 
@@ -44,6 +59,10 @@ function isApiGatewayService(
   service: LoadedService,
 ): service is Extract<LoadedService, { metadata: { serviceType: "apigateway" } }> {
   return service.metadata.serviceType === "apigateway";
+}
+
+function isEcsService(service: LoadedService): service is EcsService {
+  return service.metadata.serviceType === "ecs";
 }
 
 function terraformForLambda(
@@ -184,13 +203,685 @@ function lambdaDynamoDbPolicies(
   };
 }
 
+function terraformForEcs(service: EcsService, options: TerraformOptions): TerraformJson {
+  const resourceName = terraformName(service.metadata.serviceName);
+
+  if (options.target === "floci") {
+    return flociEcsResources(service, resourceName);
+  }
+
+  if (service.config.cluster.capacity === "fargate") {
+    return awsFargateEcsResources(service, resourceName, options);
+  }
+
+  return awsEc2EcsResources(service, resourceName, options);
+}
+
+function awsEc2EcsResources(
+  service: EcsService,
+  resourceName: string,
+  options: TerraformOptions,
+): TerraformJson {
+  const physicalServiceName = physicalName(service.metadata);
+  const roleName = `${resourceName}_task_execution_role`;
+  const instanceRoleName = `${resourceName}_instance_role`;
+  const desiredCapacity = service.config.cluster.desiredCapacity ?? 1;
+  const instanceType = service.config.cluster.instanceType ?? "t3.micro";
+
+  return baseTerraform(
+    service.metadata,
+    options,
+    {
+      aws_ecs_cluster: {
+        [resourceName]: {
+          name: physicalServiceName,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_iam_role: {
+        [roleName]: {
+          name: physicalName(service.metadata, "task-execution-role"),
+          assume_role_policy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Action: "sts:AssumeRole",
+                Effect: "Allow",
+                Principal: { Service: "ecs-tasks.amazonaws.com" },
+              },
+            ],
+          }),
+          tags: tagsFor(service.metadata),
+        },
+        [instanceRoleName]: {
+          name: physicalName(service.metadata, "instance-role"),
+          assume_role_policy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Action: "sts:AssumeRole",
+                Effect: "Allow",
+                Principal: { Service: "ec2.amazonaws.com" },
+              },
+            ],
+          }),
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_iam_role_policy_attachment: {
+        [`${roleName}_execution`]: {
+          role: `\${aws_iam_role.${roleName}.name}`,
+          policy_arn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+        },
+        [`${instanceRoleName}_ecs`]: {
+          role: `\${aws_iam_role.${instanceRoleName}.name}`,
+          policy_arn: "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role",
+        },
+      },
+      aws_iam_instance_profile: {
+        [resourceName]: {
+          name: physicalName(service.metadata, "instance-profile"),
+          role: `\${aws_iam_role.${instanceRoleName}.name}`,
+        },
+      },
+      aws_cloudwatch_log_group: {
+        [resourceName]: {
+          name: `/ecs/${physicalServiceName}`,
+          retention_in_days: 7,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_ecs_task_definition: {
+        [resourceName]: {
+          family: physicalServiceName,
+          network_mode: "bridge",
+          requires_compatibilities: ["EC2"],
+          cpu: String(service.config.task.cpu),
+          memory: String(service.config.task.memoryMb),
+          execution_role_arn: `\${aws_iam_role.${roleName}.arn}`,
+          container_definitions: JSON.stringify([
+            {
+              name: resourceName,
+              image: `${service.config.image.repository}:${service.config.image.tag}`,
+              essential: true,
+              portMappings: [
+                {
+                  containerPort: service.config.service.containerPort,
+                  hostPort: 0,
+                  protocol: "tcp",
+                },
+              ],
+              logConfiguration: {
+                logDriver: "awslogs",
+                options: {
+                  "awslogs-group": `/ecs/${physicalServiceName}`,
+                  "awslogs-region": regionForTarget(options.target ?? "aws"),
+                  "awslogs-stream-prefix": resourceName,
+                },
+              },
+            },
+          ]),
+        },
+      },
+      aws_lb: {
+        [resourceName]: {
+          name: physicalServiceName,
+          load_balancer_type: "application",
+          internal: service.metadata.securityZone !== "public",
+          subnets: "${data.aws_subnets.default.ids}",
+          security_groups: [`\${aws_security_group.${resourceName}.id}`],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lb_target_group: {
+        [resourceName]: {
+          name: physicalServiceName,
+          port: service.config.service.containerPort,
+          protocol: "HTTP",
+          target_type: "instance",
+          vpc_id: "${data.aws_vpc.default.id}",
+          health_check: {
+            path: service.config.healthCheck.path,
+            protocol: "HTTP",
+          },
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lb_listener: {
+        [resourceName]: {
+          load_balancer_arn: `\${aws_lb.${resourceName}.arn}`,
+          port: 80,
+          protocol: "HTTP",
+          default_action: {
+            type: "forward",
+            target_group_arn: `\${aws_lb_target_group.${resourceName}.arn}`,
+          },
+        },
+      },
+      aws_launch_template: {
+        [resourceName]: {
+          name_prefix: `${physicalServiceName}-`,
+          image_id: "${data.aws_ssm_parameter.ecs_optimized_ami.value}",
+          instance_type: instanceType,
+          iam_instance_profile: {
+            name: `\${aws_iam_instance_profile.${resourceName}.name}`,
+          },
+          user_data: `\${base64encode("ECS_CLUSTER=\${aws_ecs_cluster.${resourceName}.name}\\n")}`,
+          vpc_security_group_ids: [`\${aws_security_group.${resourceName}.id}`],
+          tag_specifications: {
+            resource_type: "instance",
+            tags: tagsFor(service.metadata),
+          },
+        },
+      },
+      aws_autoscaling_group: {
+        [resourceName]: {
+          desired_capacity: desiredCapacity,
+          min_size: service.config.cluster.autoscaling?.minCapacity ?? desiredCapacity,
+          max_size: service.config.cluster.autoscaling?.maxCapacity ?? desiredCapacity,
+          vpc_zone_identifier: "${data.aws_subnets.default.ids}",
+          launch_template: {
+            id: `\${aws_launch_template.${resourceName}.id}`,
+            version: "$Latest",
+          },
+          tag: Object.entries(tagsFor(service.metadata)).map(([key, value]) => ({
+            key,
+            value,
+            propagate_at_launch: true,
+          })),
+        },
+      },
+      aws_ecs_capacity_provider: {
+        [resourceName]: {
+          name: physicalName(service.metadata, "capacity-provider"),
+          auto_scaling_group_provider: {
+            auto_scaling_group_arn: `\${aws_autoscaling_group.${resourceName}.arn}`,
+            managed_scaling: {
+              status: "ENABLED",
+              target_capacity: 100,
+            },
+          },
+        },
+      },
+      aws_ecs_cluster_capacity_providers: {
+        [resourceName]: {
+          cluster_name: `\${aws_ecs_cluster.${resourceName}.name}`,
+          capacity_providers: [`\${aws_ecs_capacity_provider.${resourceName}.name}`],
+        },
+      },
+      aws_ecs_service: {
+        [resourceName]: {
+          name: physicalServiceName,
+          cluster: `\${aws_ecs_cluster.${resourceName}.id}`,
+          task_definition: `\${aws_ecs_task_definition.${resourceName}.arn}`,
+          desired_count: service.config.service.desiredCount,
+          launch_type: "EC2",
+          load_balancer: {
+            target_group_arn: `\${aws_lb_target_group.${resourceName}.arn}`,
+            container_name: resourceName,
+            container_port: service.config.service.containerPort,
+          },
+          depends_on: [`aws_lb_listener.${resourceName}`],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_security_group: {
+        [resourceName]: {
+          name: physicalServiceName,
+          description: `Security group for ${physicalServiceName}`,
+          vpc_id: "${data.aws_vpc.default.id}",
+          ingress: [
+            {
+              description: "Allow HTTP ingress",
+              from_port: 80,
+              to_port: 80,
+              protocol: "tcp",
+              cidr_blocks: ["0.0.0.0/0"],
+              ipv6_cidr_blocks: [],
+              prefix_list_ids: [],
+              security_groups: [],
+              self: false,
+            },
+            {
+              description: "Allow container traffic from this security group",
+              from_port: service.config.service.containerPort,
+              to_port: service.config.service.containerPort,
+              protocol: "tcp",
+              cidr_blocks: [],
+              ipv6_cidr_blocks: [],
+              prefix_list_ids: [],
+              security_groups: [],
+              self: true,
+            },
+          ],
+          egress: [
+            {
+              description: "Allow all egress",
+              from_port: 0,
+              to_port: 0,
+              protocol: "-1",
+              cidr_blocks: ["0.0.0.0/0"],
+              ipv6_cidr_blocks: [],
+              prefix_list_ids: [],
+              security_groups: [],
+              self: false,
+            },
+          ],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      ...ecsServiceAutoscalingResources(service, resourceName),
+    },
+    {
+      aws_vpc: {
+        default: {
+          default: true,
+        },
+      },
+      aws_subnets: {
+        default: {
+          filter: {
+            name: "vpc-id",
+            values: ["${data.aws_vpc.default.id}"],
+          },
+        },
+      },
+      aws_ssm_parameter: {
+        ecs_optimized_ami: {
+          name: "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id",
+        },
+      },
+    },
+  );
+}
+
+function flociEcsResources(service: EcsService, resourceName: string): TerraformJson {
+  const physicalServiceName = physicalName(service.metadata);
+
+  return baseTerraform(
+    service.metadata,
+    { target: "floci" },
+    {
+      aws_ecs_cluster: {
+        [resourceName]: {
+          name: physicalServiceName,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_ecs_task_definition: {
+        [resourceName]: {
+          family: physicalServiceName,
+          network_mode: "bridge",
+          requires_compatibilities: ["EC2"],
+          cpu: String(service.config.task.cpu),
+          memory: String(service.config.task.memoryMb),
+          container_definitions: JSON.stringify([
+            {
+              name: resourceName,
+              image: `${service.config.image.repository}:${service.config.image.tag}`,
+              essential: true,
+              portMappings: [
+                {
+                  containerPort: service.config.service.containerPort,
+                  hostPort: service.config.service.containerPort,
+                  protocol: "tcp",
+                },
+              ],
+            },
+          ]),
+        },
+      },
+      aws_ecs_service: {
+        [resourceName]: {
+          name: physicalServiceName,
+          cluster: `\${aws_ecs_cluster.${resourceName}.id}`,
+          task_definition: `\${aws_ecs_task_definition.${resourceName}.arn}`,
+          desired_count: service.config.service.desiredCount,
+          launch_type: "EC2",
+          load_balancer: {
+            target_group_arn: `\${aws_lb_target_group.${resourceName}.arn}`,
+            container_name: resourceName,
+            container_port: service.config.service.containerPort,
+          },
+          depends_on: [`aws_lb_listener.${resourceName}`],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lb: {
+        [resourceName]: {
+          name: physicalServiceName,
+          load_balancer_type: "application",
+          internal: false,
+          subnets: "${data.aws_subnets.default.ids}",
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lb_target_group: {
+        [resourceName]: {
+          name_prefix: targetGroupNamePrefix(resourceName),
+          port: service.config.service.containerPort,
+          protocol: "HTTP",
+          target_type: "ip",
+          vpc_id: "${data.aws_vpc.default.id}",
+          health_check: {
+            path: service.config.healthCheck.path,
+            protocol: "HTTP",
+          },
+          tags: tagsFor(service.metadata),
+          lifecycle: {
+            create_before_destroy: true,
+          },
+        },
+      },
+      aws_lb_listener: {
+        [resourceName]: {
+          load_balancer_arn: `\${aws_lb.${resourceName}.arn}`,
+          port: 80,
+          protocol: "HTTP",
+          default_action: {
+            type: "forward",
+            target_group_arn: `\${aws_lb_target_group.${resourceName}.arn}`,
+          },
+        },
+      },
+    },
+    {
+      aws_vpc: {
+        default: {
+          default: true,
+        },
+      },
+      aws_subnets: {
+        default: {
+          filter: {
+            name: "vpc-id",
+            values: ["${data.aws_vpc.default.id}"],
+          },
+        },
+      },
+    },
+  );
+}
+
+function awsFargateEcsResources(
+  service: EcsService,
+  resourceName: string,
+  options: TerraformOptions,
+): TerraformJson {
+  const physicalServiceName = physicalName(service.metadata);
+  const roleName = `${resourceName}_task_execution_role`;
+
+  return baseTerraform(
+    service.metadata,
+    options,
+    {
+      aws_ecs_cluster: {
+        [resourceName]: {
+          name: physicalServiceName,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_iam_role: {
+        [roleName]: {
+          name: physicalName(service.metadata, "task-execution-role"),
+          assume_role_policy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Action: "sts:AssumeRole",
+                Effect: "Allow",
+                Principal: { Service: "ecs-tasks.amazonaws.com" },
+              },
+            ],
+          }),
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_iam_role_policy_attachment: {
+        [`${roleName}_execution`]: {
+          role: `\${aws_iam_role.${roleName}.name}`,
+          policy_arn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+        },
+      },
+      aws_cloudwatch_log_group: {
+        [resourceName]: {
+          name: `/ecs/${physicalServiceName}`,
+          retention_in_days: 7,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_ecs_task_definition: {
+        [resourceName]: {
+          family: physicalServiceName,
+          network_mode: "awsvpc",
+          requires_compatibilities: ["FARGATE"],
+          cpu: String(service.config.task.cpu),
+          memory: String(service.config.task.memoryMb),
+          execution_role_arn: `\${aws_iam_role.${roleName}.arn}`,
+          container_definitions: JSON.stringify([
+            {
+              name: resourceName,
+              image: `${service.config.image.repository}:${service.config.image.tag}`,
+              essential: true,
+              portMappings: [
+                {
+                  containerPort: service.config.service.containerPort,
+                  hostPort: service.config.service.containerPort,
+                  protocol: "tcp",
+                },
+              ],
+              logConfiguration: {
+                logDriver: "awslogs",
+                options: {
+                  "awslogs-group": `/ecs/${physicalServiceName}`,
+                  "awslogs-region": regionForTarget(options.target ?? "aws"),
+                  "awslogs-stream-prefix": resourceName,
+                },
+              },
+            },
+          ]),
+        },
+      },
+      aws_lb: {
+        [resourceName]: {
+          name: physicalServiceName,
+          load_balancer_type: "application",
+          internal: service.metadata.securityZone !== "public",
+          subnets: "${data.aws_subnets.default.ids}",
+          security_groups: [`\${aws_security_group.${resourceName}.id}`],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lb_target_group: {
+        [resourceName]: {
+          name: physicalServiceName,
+          port: service.config.service.containerPort,
+          protocol: "HTTP",
+          target_type: "ip",
+          vpc_id: "${data.aws_vpc.default.id}",
+          health_check: {
+            path: service.config.healthCheck.path,
+            protocol: "HTTP",
+          },
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lb_listener: {
+        [resourceName]: {
+          load_balancer_arn: `\${aws_lb.${resourceName}.arn}`,
+          port: 80,
+          protocol: "HTTP",
+          default_action: {
+            type: "forward",
+            target_group_arn: `\${aws_lb_target_group.${resourceName}.arn}`,
+          },
+        },
+      },
+      aws_ecs_service: {
+        [resourceName]: {
+          name: physicalServiceName,
+          cluster: `\${aws_ecs_cluster.${resourceName}.id}`,
+          task_definition: `\${aws_ecs_task_definition.${resourceName}.arn}`,
+          desired_count: service.config.service.desiredCount,
+          launch_type: "FARGATE",
+          network_configuration: {
+            subnets: "${data.aws_subnets.default.ids}",
+            security_groups: [`\${aws_security_group.${resourceName}.id}`],
+            assign_public_ip: service.metadata.securityZone === "public",
+          },
+          load_balancer: {
+            target_group_arn: `\${aws_lb_target_group.${resourceName}.arn}`,
+            container_name: resourceName,
+            container_port: service.config.service.containerPort,
+          },
+          depends_on: [`aws_lb_listener.${resourceName}`],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_security_group: {
+        [resourceName]: {
+          name: physicalServiceName,
+          description: `Security group for ${physicalServiceName}`,
+          vpc_id: "${data.aws_vpc.default.id}",
+          ingress: [
+            {
+              description: "Allow HTTP ingress",
+              from_port: 80,
+              to_port: 80,
+              protocol: "tcp",
+              cidr_blocks: ["0.0.0.0/0"],
+              ipv6_cidr_blocks: [],
+              prefix_list_ids: [],
+              security_groups: [],
+              self: false,
+            },
+            {
+              description: "Allow container traffic from this security group",
+              from_port: service.config.service.containerPort,
+              to_port: service.config.service.containerPort,
+              protocol: "tcp",
+              cidr_blocks: [],
+              ipv6_cidr_blocks: [],
+              prefix_list_ids: [],
+              security_groups: [],
+              self: true,
+            },
+          ],
+          egress: [
+            {
+              description: "Allow all egress",
+              from_port: 0,
+              to_port: 0,
+              protocol: "-1",
+              cidr_blocks: ["0.0.0.0/0"],
+              ipv6_cidr_blocks: [],
+              prefix_list_ids: [],
+              security_groups: [],
+              self: false,
+            },
+          ],
+          tags: tagsFor(service.metadata),
+        },
+      },
+      ...ecsServiceAutoscalingResources(service, resourceName),
+    },
+    {
+      aws_vpc: {
+        default: {
+          default: true,
+        },
+      },
+      aws_subnets: {
+        default: {
+          filter: {
+            name: "vpc-id",
+            values: ["${data.aws_vpc.default.id}"],
+          },
+        },
+      },
+    },
+  );
+}
+
+function ecsServiceAutoscalingResources(
+  service: EcsService,
+  resourceName: string,
+): Record<string, unknown> {
+  const autoscaling = service.config.service.autoscaling;
+  if (!autoscaling) {
+    return {};
+  }
+
+  const policies: Record<string, unknown> = {};
+
+  if (autoscaling.targetCpuUtilization !== undefined) {
+    policies[`${resourceName}_cpu`] = ecsTargetTrackingPolicy(
+      service,
+      resourceName,
+      "cpu-autoscaling",
+      "ECSServiceAverageCPUUtilization",
+      autoscaling.targetCpuUtilization,
+    );
+  }
+
+  if (autoscaling.targetMemoryUtilization !== undefined) {
+    policies[`${resourceName}_memory`] = ecsTargetTrackingPolicy(
+      service,
+      resourceName,
+      "memory-autoscaling",
+      "ECSServiceAverageMemoryUtilization",
+      autoscaling.targetMemoryUtilization,
+    );
+  }
+
+  return {
+    aws_appautoscaling_target: {
+      [resourceName]: {
+        max_capacity: autoscaling.maxCount,
+        min_capacity: autoscaling.minCount,
+        resource_id: `service/\${aws_ecs_cluster.${resourceName}.name}/\${aws_ecs_service.${resourceName}.name}`,
+        scalable_dimension: "ecs:service:DesiredCount",
+        service_namespace: "ecs",
+      },
+    },
+    aws_appautoscaling_policy: policies,
+  };
+}
+
+function ecsTargetTrackingPolicy(
+  service: EcsService,
+  resourceName: string,
+  nameSuffix: string,
+  metricType: "ECSServiceAverageCPUUtilization" | "ECSServiceAverageMemoryUtilization",
+  targetValue: number,
+): Record<string, unknown> {
+  return {
+    name: physicalName(service.metadata, nameSuffix),
+    policy_type: "TargetTrackingScaling",
+    resource_id: `\${aws_appautoscaling_target.${resourceName}.resource_id}`,
+    scalable_dimension: `\${aws_appautoscaling_target.${resourceName}.scalable_dimension}`,
+    service_namespace: `\${aws_appautoscaling_target.${resourceName}.service_namespace}`,
+    target_tracking_scaling_policy_configuration: {
+      predefined_metric_specification: {
+        predefined_metric_type: metricType,
+      },
+      target_value: targetValue,
+    },
+  };
+}
+
 function terraformForApiGateway(
   service: Extract<LoadedService, { metadata: { serviceType: "apigateway" } }>,
   options: TerraformOptions,
 ): TerraformJson {
   const resourceName = terraformName(service.metadata.serviceName);
+  const routes = service.config.routes.map((route) => resolveApiGatewayRoute(route, options));
 
   const domainTerraform = apiGatewayDomainResources(service, resourceName, options);
+  const dataTerraform = {
+    ...domainTerraform.data,
+    ...apiGatewayEcsTargetData(routes, options),
+  };
 
   return baseTerraform(
     service.metadata,
@@ -213,23 +904,23 @@ function terraformForApiGateway(
         },
       },
       aws_apigatewayv2_integration: Object.fromEntries(
-        service.config.routes.map((route) => {
+        routes.map((route) => {
           const routeName = apiGatewayRouteName(resourceName, route);
 
           return [
             routeName,
             {
               api_id: `\${aws_apigatewayv2_api.${resourceName}.id}`,
-              integration_type: route.target.type === "http_proxy" ? "HTTP_PROXY" : "AWS_PROXY",
+              integration_type: route.resolvedTarget.type === "lambda" ? "AWS_PROXY" : "HTTP_PROXY",
               integration_method: route.method,
               integration_uri: apiGatewayIntegrationUri(route, options),
-              payload_format_version: route.target.type === "lambda" ? "2.0" : undefined,
+              payload_format_version: route.resolvedTarget.type === "lambda" ? "2.0" : undefined,
             },
           ];
         }),
       ),
       aws_apigatewayv2_route: Object.fromEntries(
-        service.config.routes.map((route) => {
+        routes.map((route) => {
           const routeName = apiGatewayRouteName(resourceName, route);
 
           return [
@@ -242,11 +933,19 @@ function terraformForApiGateway(
           ];
         }),
       ),
-      ...apiGatewayLambdaPermissions(service, resourceName, options),
+      ...apiGatewayLambdaPermissions(routes, resourceName, options),
       ...domainTerraform.resource,
     },
-    domainTerraform.data,
+    Object.keys(dataTerraform).length > 0 ? dataTerraform : undefined,
   );
+}
+
+function resolveApiGatewayRoute(
+  route: ApiGatewayRoute,
+  options: TerraformOptions,
+): ResolvedApiGatewayRoute {
+  const target = route.targets?.[options.target ?? "aws"] ?? route.target;
+  return { ...route, resolvedTarget: target };
 }
 
 function apiGatewayStageTagConfig(
@@ -267,11 +966,11 @@ function apiGatewayStageTagConfig(
 }
 
 function apiGatewayLambdaPermissions(
-  service: Extract<LoadedService, { metadata: { serviceType: "apigateway" } }>,
+  routes: ResolvedApiGatewayRoute[],
   resourceName: string,
   options: TerraformOptions,
 ): Record<string, unknown> {
-  const lambdaRoutes = service.config.routes.filter(isApiGatewayLambdaRoute);
+  const lambdaRoutes = routes.filter(isApiGatewayLambdaRoute);
 
   if (lambdaRoutes.length === 0) {
     return {};
@@ -281,7 +980,7 @@ function apiGatewayLambdaPermissions(
     aws_lambda_permission: Object.fromEntries(
       lambdaRoutes.map((route) => {
         const routeName = apiGatewayRouteName(resourceName, route);
-        const lambdaName = lambdaNameForService(route.target.service, options);
+        const lambdaName = lambdaNameForService(route.resolvedTarget.service, options);
 
         return [
           routeName,
@@ -291,6 +990,35 @@ function apiGatewayLambdaPermissions(
             function_name: lambdaName,
             principal: "apigateway.amazonaws.com",
             source_arn: `\${aws_apigatewayv2_api.${resourceName}.execution_arn}/*/*`,
+          },
+        ];
+      }),
+    ),
+  };
+}
+
+function apiGatewayEcsTargetData(
+  routes: ResolvedApiGatewayRoute[],
+  options: TerraformOptions,
+): Record<string, unknown> {
+  const ecsRoutes = routes.filter(isApiGatewayEcsRoute);
+
+  if (ecsRoutes.length === 0) {
+    return {};
+  }
+
+  return {
+    aws_lb: Object.fromEntries(
+      ecsRoutes.map((route) => {
+        const serviceName = route.resolvedTarget.service;
+        return [
+          terraformName(serviceName),
+          {
+            name: serviceNameFor(
+              serviceName,
+              options,
+              "apigateway route references unknown ECS service",
+            ),
           },
         ];
       }),
@@ -398,20 +1126,54 @@ function certificateArnForDomain(
   return `\${data.aws_acm_certificate.${resourceName}.arn}`;
 }
 
-function isApiGatewayLambdaRoute(route: ApiGatewayRoute): route is ApiGatewayLambdaRoute {
-  return route.target.type === "lambda";
+function isApiGatewayLambdaRoute(route: ResolvedApiGatewayRoute): route is ResolvedLambdaRoute {
+  return route.resolvedTarget.type === "lambda";
 }
 
-function apiGatewayIntegrationUri(route: ApiGatewayRoute, options: TerraformOptions): string {
-  if (route.target.type === "http_proxy") {
-    return route.target.uri;
+function isApiGatewayEcsRoute(route: ResolvedApiGatewayRoute): route is ResolvedEcsRoute {
+  return route.resolvedTarget.type === "ecs";
+}
+
+function apiGatewayIntegrationUri(
+  route: ResolvedApiGatewayRoute,
+  options: TerraformOptions,
+): string {
+  if (route.resolvedTarget.type === "http_proxy") {
+    return route.resolvedTarget.uri;
   }
 
-  const lambdaName = lambdaNameForService(route.target.service, options);
+  if (route.resolvedTarget.type === "ecs") {
+    const resourceName = ecsResourceNameForService(route.resolvedTarget.service, options);
+    return `http://\${data.aws_lb.${resourceName}.dns_name}${apiGatewayIntegrationPath(route.path)}`;
+  }
+
+  const lambdaName = lambdaNameForService(route.resolvedTarget.service, options);
 
   const region = regionForTarget(options.target ?? "aws");
 
   return `arn:aws:apigateway:${region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${region}:*:function:${lambdaName}/invocations`;
+}
+
+function ecsResourceNameForService(serviceName: string, options: TerraformOptions): string {
+  serviceNameFor(serviceName, options, "apigateway route references unknown ECS service");
+  return terraformName(serviceName);
+}
+
+function targetGroupNamePrefix(resourceName: string): string {
+  return `${resourceName.replace(/_/g, "").slice(0, 5)}-`;
+}
+
+function serviceNameFor(serviceName: string, options: TerraformOptions, message: string): string {
+  const configuredName = options.serviceNames?.[serviceName];
+  if (configuredName) {
+    return configuredName;
+  }
+
+  throw new Error(`${message} ${serviceName}`);
+}
+
+function apiGatewayIntegrationPath(routePath: string): string {
+  return routePath.replace("{proxy+}", "{proxy}");
 }
 
 function lambdaNameForService(serviceName: string, options: TerraformOptions): string {
@@ -423,7 +1185,7 @@ function lambdaNameForService(serviceName: string, options: TerraformOptions): s
   throw new Error(`apigateway route references unknown Lambda service ${serviceName}`);
 }
 
-function apiGatewayRouteName(resourceName: string, route: ApiGatewayRoute): string {
+function apiGatewayRouteName(resourceName: string, route: ResolvedApiGatewayRoute): string {
   const pathName =
     route.path === "/{proxy+}"
       ? "proxy"
@@ -432,7 +1194,7 @@ function apiGatewayRouteName(resourceName: string, route: ApiGatewayRoute): stri
           .replace(/[^a-zA-Z0-9]+/g, "_")
           .replace(/^_+|_+$/g, "");
 
-  return terraformName(`${resourceName}_${route.target.type}_${pathName || "root"}`);
+  return terraformName(`${resourceName}_${route.resolvedTarget.type}_${pathName || "root"}`);
 }
 
 function tableNameForService(serviceName: string, options: TerraformOptions): string {
@@ -517,9 +1279,13 @@ function providerConfig(metadata: ServiceMetadata, target: DeployTarget): Record
     skip_requesting_account_id: true,
     s3_use_path_style: true,
     endpoints: {
+      applicationautoscaling: "http://localhost:4566",
       apigateway: "http://localhost:4566",
       apigatewayv2: "http://localhost:4566",
       dynamodb: "http://localhost:4566",
+      ec2: "http://localhost:4566",
+      ecs: "http://localhost:4566",
+      elbv2: "http://localhost:4566",
       iam: "http://localhost:4566",
       route53: "http://localhost:4566",
       lambda: "http://localhost:4566",

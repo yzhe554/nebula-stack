@@ -1,4 +1,4 @@
-export type ServiceType = "lambda" | "dynamodb" | "apigateway";
+export type ServiceType = "lambda" | "dynamodb" | "apigateway" | "ecs";
 
 export type ServiceMetadata = {
   env: string;
@@ -72,7 +72,46 @@ export type ApiGatewayCertificate = { arn: string } | { lookupDomain: string };
 export type ApiGatewayRoute = {
   path: string;
   method: "ANY" | "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
-  target: { type: "http_proxy"; uri: string } | { type: "lambda"; service: string };
+  target: ApiGatewayRouteTarget;
+  targets?: Partial<Record<"floci" | "aws", ApiGatewayRouteTarget>>;
+};
+
+export type ApiGatewayRouteTarget =
+  | { type: "http_proxy"; uri: string }
+  | { type: "lambda"; service: string }
+  | { type: "ecs"; service: string };
+
+export type EcsConfig = {
+  cluster: {
+    capacity: "ec2" | "fargate";
+    instanceType?: string;
+    desiredCapacity?: number;
+    autoscaling?: {
+      minCapacity: number;
+      maxCapacity: number;
+    };
+  };
+  service: {
+    desiredCount: number;
+    containerPort: number;
+    autoscaling?: {
+      minCount: number;
+      maxCount: number;
+      targetCpuUtilization?: number;
+      targetMemoryUtilization?: number;
+    };
+  };
+  task: {
+    cpu: number;
+    memoryMb: number;
+  };
+  image: {
+    repository: string;
+    tag: string;
+  };
+  healthCheck: {
+    path: string;
+  };
 };
 
 export type LoadedService =
@@ -87,6 +126,10 @@ export type LoadedService =
   | {
       metadata: ServiceMetadata & { serviceType: "apigateway" };
       config: ApiGatewayConfig;
+    }
+  | {
+      metadata: ServiceMetadata & { serviceType: "ecs" };
+      config: EcsConfig;
     };
 
 export type NetworkFlow = {

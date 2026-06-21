@@ -116,6 +116,169 @@ describe("terraformForService", () => {
     });
   });
 
+  test("generates ECS Fargate Terraform JSON for a Next.js app", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/docs-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "fargate" },
+        service: {
+          desiredCount: 1,
+          containerPort: 3001,
+          autoscaling: {
+            minCount: 1,
+            maxCount: 4,
+            targetCpuUtilization: 60,
+            targetMemoryUtilization: 70,
+          },
+        },
+        task: { cpu: 512, memoryMb: 1024 },
+        image: { repository: "nebula-docs", tag: "local" },
+        healthCheck: { path: "/docs" },
+      },
+    };
+
+    const terraform = terraformResult(terraformForService(service, { target: "aws" }));
+
+    expect(resource(terraform, "aws_ecs_task_definition", "docs_app")).toMatchObject({
+      family: "dev-venture-core-public-docs-app",
+      network_mode: "awsvpc",
+      requires_compatibilities: ["FARGATE"],
+      cpu: "512",
+      memory: "1024",
+    });
+    expect(resource(terraform, "aws_ecs_service", "docs_app")).toMatchObject({
+      name: "dev-venture-core-public-docs-app",
+      launch_type: "FARGATE",
+      desired_count: 1,
+      network_configuration: {
+        subnets: "${data.aws_subnets.default.ids}",
+        security_groups: ["${aws_security_group.docs_app.id}"],
+        assign_public_ip: true,
+      },
+      load_balancer: {
+        target_group_arn: "${aws_lb_target_group.docs_app.arn}",
+        container_name: "docs_app",
+        container_port: 3001,
+      },
+    });
+    expect(resource(terraform, "aws_lb_target_group", "docs_app")).toMatchObject({
+      name: "dev-venture-core-public-docs-app",
+      port: 3001,
+      protocol: "HTTP",
+      target_type: "ip",
+      health_check: {
+        path: "/docs",
+        protocol: "HTTP",
+      },
+    });
+    expect(resource(terraform, "aws_appautoscaling_target", "docs_app")).toMatchObject({
+      max_capacity: 4,
+      min_capacity: 1,
+      resource_id: "service/${aws_ecs_cluster.docs_app.name}/${aws_ecs_service.docs_app.name}",
+      scalable_dimension: "ecs:service:DesiredCount",
+      service_namespace: "ecs",
+    });
+    expect(resource(terraform, "aws_appautoscaling_policy", "docs_app_cpu")).toMatchObject({
+      target_tracking_scaling_policy_configuration: {
+        predefined_metric_specification: {
+          predefined_metric_type: "ECSServiceAverageCPUUtilization",
+        },
+        target_value: 60,
+      },
+    });
+    expect(resource(terraform, "aws_appautoscaling_policy", "docs_app_memory")).toMatchObject({
+      target_tracking_scaling_policy_configuration: {
+        predefined_metric_specification: {
+          predefined_metric_type: "ECSServiceAverageMemoryUtilization",
+        },
+        target_value: 70,
+      },
+    });
+    expect(terraform.resource.aws_launch_template).toBeUndefined();
+    expect(terraform.resource.aws_autoscaling_group).toBeUndefined();
+    expect(terraform.resource.aws_ecs_capacity_provider).toBeUndefined();
+
+    const flociTerraform = terraformResult(terraformForService(service, { target: "floci" }));
+
+    expect(resource(flociTerraform, "aws_ecs_service", "docs_app")).toMatchObject({
+      launch_type: "EC2",
+      desired_count: 1,
+      load_balancer: {
+        target_group_arn: "${aws_lb_target_group.docs_app.arn}",
+        container_name: "docs_app",
+        container_port: 3001,
+      },
+      depends_on: ["aws_lb_listener.docs_app"],
+    });
+    expect(resource(flociTerraform, "aws_lb_target_group", "docs_app")).toMatchObject({
+      name_prefix: "docsa-",
+      port: 3001,
+      protocol: "HTTP",
+      target_type: "ip",
+      health_check: {
+        path: "/docs",
+        protocol: "HTTP",
+      },
+      lifecycle: {
+        create_before_destroy: true,
+      },
+    });
+    expect(flociTerraform.resource.aws_appautoscaling_target).toBeUndefined();
+    expect(flociTerraform.resource.aws_appautoscaling_policy).toBeUndefined();
+  });
+
+  test("generates ECS EC2 capacity resources when requested", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/docs-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "ec2", instanceType: "t3.micro", desiredCapacity: 1 },
+        service: { desiredCount: 1, containerPort: 3001 },
+        task: { cpu: 512, memoryMb: 1024 },
+        image: { repository: "nebula-docs", tag: "local" },
+        healthCheck: { path: "/docs" },
+      },
+    };
+
+    const terraform = terraformResult(terraformForService(service, { target: "aws" }));
+
+    expect(resource(terraform, "aws_ecs_task_definition", "docs_app")).toMatchObject({
+      network_mode: "bridge",
+      requires_compatibilities: ["EC2"],
+    });
+    expect(resource(terraform, "aws_ecs_service", "docs_app")).toMatchObject({
+      launch_type: "EC2",
+    });
+    expect(resource(terraform, "aws_launch_template", "docs_app")).toMatchObject({
+      name_prefix: "dev-venture-core-public-docs-app-",
+      instance_type: "t3.micro",
+      image_id: "${data.aws_ssm_parameter.ecs_optimized_ami.value}",
+    });
+    expect(resource(terraform, "aws_autoscaling_group", "docs_app")).toMatchObject({
+      desired_capacity: 1,
+      min_size: 1,
+      max_size: 1,
+    });
+    expect(data(terraform, "aws_ssm_parameter", "ecs_optimized_ami")).toEqual({
+      name: "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id",
+    });
+  });
+
   test("generates Lambda Terraform JSON from a package path", () => {
     const service: LoadedService = {
       metadata: {
@@ -380,6 +543,73 @@ describe("terraformForService", () => {
         "domain_name_configuration",
       ).certificate_arn,
     ).toBe("${data.aws_acm_certificate.docs.arn}");
+  });
+
+  test("generates API Gateway HTTP proxy routes for ECS targets", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-ingress",
+        serviceType: "apigateway",
+        sourcePath: "infra/services/dev/venture/core/public/docs-ingress.apigateway.yaml",
+      },
+      config: {
+        description: "Docs ingress",
+        routes: [
+          {
+            path: "/docs",
+            method: "ANY",
+            target: { type: "ecs", service: "docs-app" },
+          },
+        ],
+      },
+    };
+
+    const terraform = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: {
+          "docs-app": "dev-venture-core-public-docs-app",
+        },
+      }),
+    );
+
+    expect(
+      resource(terraform, "aws_apigatewayv2_integration", "docs_ingress_ecs_docs"),
+    ).toMatchObject({
+      api_id: "${aws_apigatewayv2_api.docs_ingress.id}",
+      integration_type: "HTTP_PROXY",
+      integration_method: "ANY",
+      integration_uri: "http://${data.aws_lb.docs_app.dns_name}/docs",
+    });
+    expect(data(terraform, "aws_lb", "docs_app")).toEqual({
+      name: "dev-venture-core-public-docs-app",
+    });
+    expect(resource(terraform, "aws_apigatewayv2_route", "docs_ingress_ecs_docs")).toMatchObject({
+      route_key: "ANY /docs",
+    });
+
+    const flociTerraform = terraformResult(
+      terraformForService(service, {
+        target: "floci",
+        serviceNames: {
+          "docs-app": "dev-venture-core-public-docs-app",
+        },
+      }),
+    );
+
+    expect(
+      resource(flociTerraform, "aws_apigatewayv2_integration", "docs_ingress_ecs_docs"),
+    ).toMatchObject({
+      integration_type: "HTTP_PROXY",
+      integration_uri: "http://${data.aws_lb.docs_app.dns_name}/docs",
+    });
+    expect(data(flociTerraform, "aws_lb", "docs_app")).toEqual({
+      name: "dev-venture-core-public-docs-app",
+    });
   });
 
   test("requires an AWS API Gateway domain certificate config", () => {

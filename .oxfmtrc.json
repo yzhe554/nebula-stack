@@ -8,6 +8,7 @@
     "**/dist/**",
     "**/dist-ts/**",
     "**/node_modules/**",
+    "packages/platform/schemas/*.schema.json",
     "docs/superpowers/**",
     "pnpm-lock.yaml"
   ]

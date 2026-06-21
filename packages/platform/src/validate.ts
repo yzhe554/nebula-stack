@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { ZodError } from "zod";
 import { loadNetworkPolicy } from "./network-zones";
-import { apiGatewaySchema, dynamoDbSchema, lambdaSchema } from "./schemas";
+import { apiGatewaySchema, dynamoDbSchema, ecsSchema, lambdaSchema } from "./schemas";
 import { discoverServices } from "./service-discovery";
 import type { LoadedService } from "./types";
 
@@ -160,6 +160,11 @@ async function validateYamlFile(filePath: string, servicesRoot: string): Promise
 
   if (fileName.endsWith(".apigateway.yaml") || fileName.endsWith(".apigateway.yml")) {
     apiGatewaySchema.parse(raw);
+    return;
+  }
+
+  if (fileName.endsWith(".ecs.yaml") || fileName.endsWith(".ecs.yml")) {
+    ecsSchema.parse(raw);
     return;
   }
 

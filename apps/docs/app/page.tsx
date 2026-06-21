@@ -18,7 +18,8 @@ const repoAreas = [
   {
     name: "apps/docs",
     eyebrow: "Documentation app",
-    description: "A Next.js app that documents the repository architecture and developer workflow.",
+    description:
+      "A Next.js app that documents the repository architecture and can be containerized for ECS hosting.",
     links: ["app/page.tsx", "app/layout.tsx", "app/globals.css"],
   },
   {
@@ -183,8 +184,9 @@ export default function Home() {
             <h2>Local ingress uses Floci path-style URLs</h2>
             <p>
               After <code>pnpm floci:deploy:all</code>, get the HTTP API id from Floci and open
-              <code>{apiGatewayUrl}</code>. The `/docs` route proxies to this docs app. The payment
-              API is exposed through its own internal API Gateway.
+              <code>{apiGatewayUrl}</code>. In Floci, the `/docs` route proxies to this local docs
+              app. In AWS-target Terraform, the same route can target the ECS-hosted docs app. The
+              payment API is exposed through its own internal API Gateway.
             </p>
           </div>
         </section>

@@ -36,6 +36,8 @@ pnpm floci:deploy:all
 
 This packages `apps/payment-api`, deploys `customer-records`, then deploys `payment-api`, the internal payment API Gateway, and the docs API Gateway to Floci.
 
+The docs API Gateway targets the ECS-hosted docs app declared in `infra/services/dev/venture/core/public/docs-app.ecs.yaml` for AWS and Floci deployments. Local development can still use `pnpm docs:dev:floci` when you want the gateway to proxy to the Next.js dev server instead.
+
 ## 3. Open The Local API Gateway
 
 Start the docs app with the same base path Floci uses for the deployed HTTP API:

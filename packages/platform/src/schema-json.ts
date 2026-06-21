@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import { apiGatewaySchema } from "../schemas/apigateway.schema";
 import { dynamoDbSchema } from "../schemas/dynamodb.schema";
+import { ecsSchema } from "../schemas/ecs.schema";
 import { lambdaSchema } from "../schemas/lambda.schema";
 import { networkPolicySchema } from "../schemas/network.schema";
 
@@ -56,9 +57,18 @@ export function apiGatewayJsonSchema(): Record<string, unknown> {
   });
 }
 
+export function ecsJsonSchema(): Record<string, unknown> {
+  return generateSchemaObject(ecsSchema, {
+    id: "https://example.local/packages/platform/schemas/ecs.schema.json",
+    title: "Platform ECS Service",
+    description: "YAML schema for AWS ECS services deployed by the platform.",
+  });
+}
+
 export const platformJsonSchemas = {
   "lambda.schema.json": lambdaJsonSchema,
   "dynamodb.schema.json": dynamoDbJsonSchema,
   "network.schema.json": networkJsonSchema,
   "apigateway.schema.json": apiGatewayJsonSchema,
+  "ecs.schema.json": ecsJsonSchema,
 } as const;

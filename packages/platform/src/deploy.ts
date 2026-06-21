@@ -69,7 +69,11 @@ function serviceDeployPriority(serviceType: string): number {
     return 1;
   }
 
-  return 2;
+  if (serviceType === "ecs") {
+    return 2;
+  }
+
+  return 3;
 }
 
 function repoRoot(): string {
