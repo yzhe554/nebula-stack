@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../../../packages/platform/schemas/network.schema.json
+# yaml-language-server: $schema=../../../../../packages/platform/schemas/network.schema.json
 cidrs:
   ipv4:
     vpc: 10.20.0.0/16

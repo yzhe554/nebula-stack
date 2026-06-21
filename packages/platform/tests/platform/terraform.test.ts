@@ -159,7 +159,7 @@ describe("terraformForService", () => {
       launch_type: "FARGATE",
       desired_count: 1,
       network_configuration: {
-        subnets: "${data.aws_subnets.default.ids}",
+        subnets: "${data.aws_subnets.selected.ids}",
         security_groups: ["${aws_security_group.docs_app.id}"],
         assign_public_ip: true,
       },
@@ -205,6 +205,15 @@ describe("terraformForService", () => {
     expect(terraform.resource.aws_launch_template).toBeUndefined();
     expect(terraform.resource.aws_autoscaling_group).toBeUndefined();
     expect(terraform.resource.aws_ecs_capacity_provider).toBeUndefined();
+    expect(data(terraform, "aws_vpc", "selected")).toEqual({
+      filter: { name: "tag:Name", values: ["dev-venture-core-vpc"] },
+    });
+    expect(data(terraform, "aws_subnets", "selected")).toEqual({
+      filter: [
+        { name: "vpc-id", values: ["${data.aws_vpc.selected.id}"] },
+        { name: "tag:Zone", values: ["public"] },
+      ],
+    });
 
     const flociTerraform = terraformResult(terraformForService(service, { target: "floci" }));
 

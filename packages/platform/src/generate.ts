@@ -2,9 +2,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { discoverServices } from "./service-discovery";
 import { generatedDirectoryForService } from "./generated-paths";
+import {
+  buildServiceManifest,
+  serviceContainerPortsFromManifest,
+  serviceNamesFromManifest,
+} from "./registry";
 import { terraformForService, type DeployTarget } from "./terraform";
 import { validateServiceReferences } from "./validate";
-import type { LoadedService } from "./types";
 
 const args = parseArgs(process.argv.slice(2));
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -26,8 +30,9 @@ const scopedServices = await discoverServices({
   servicesRoot,
 });
 validateServiceReferences(scopedServices);
-const serviceNames = serviceNamesFor(scopedServices);
-const serviceContainerPorts = serviceContainerPortsFor(scopedServices);
+const manifest = buildServiceManifest(scopedServices);
+const serviceNames = serviceNamesFromManifest(manifest);
+const serviceContainerPorts = serviceContainerPortsFromManifest(manifest);
 const target = args.target ?? "aws";
 
 for (const service of services) {
@@ -41,53 +46,6 @@ for (const service of services) {
   console.log(
     `Generated ${path.relative(repoRoot, outputDirectory)}/main.tf.json from ${path.relative(repoRoot, service.metadata.sourcePath)}`,
   );
-}
-
-function serviceContainerPortsFor(
-  loadedServices: Awaited<ReturnType<typeof discoverServices>>,
-): Record<string, number> {
-  return Object.fromEntries(
-    loadedServices
-      .filter(isEcsService)
-      .map((service) => [service.metadata.serviceName, service.config.service.containerPort]),
-  );
-}
-
-function isEcsService(
-  service: LoadedService,
-): service is Extract<LoadedService, { metadata: { serviceType: "ecs" } }> {
-  return service.metadata.serviceType === "ecs";
-}
-
-function serviceNamesFor(
-  loadedServices: Awaited<ReturnType<typeof discoverServices>>,
-): Record<string, string> {
-  return Object.fromEntries(
-    loadedServices
-      .filter(
-        (service) =>
-          service.metadata.serviceType === "dynamodb" ||
-          service.metadata.serviceType === "lambda" ||
-          service.metadata.serviceType === "ecs",
-      )
-      .map((service) => [service.metadata.serviceName, physicalName(service.metadata)]),
-  );
-}
-
-function physicalName(metadata: {
-  env: string;
-  venture: string;
-  vpc: string;
-  securityZone: string;
-  serviceName: string;
-}): string {
-  return [
-    metadata.env,
-    metadata.venture,
-    metadata.vpc,
-    metadata.securityZone,
-    metadata.serviceName,
-  ].join("-");
 }
 
 function parseArgs(argv: string[]): {

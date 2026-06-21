@@ -5,6 +5,7 @@ import {
   targetGroupNamePrefix,
   terraformName,
 } from "../../terraform/naming";
+import { vpcDataSources } from "../../terraform/vpc-lookup";
 import type { TerraformContext } from "../../terraform/context";
 import type { LoadedService } from "../../types";
 
@@ -136,7 +137,7 @@ function awsEc2EcsResources(
           name: loadBalancerName,
           load_balancer_type: "application",
           internal: service.metadata.securityZone !== "public",
-          subnets: "${data.aws_subnets.default.ids}",
+          subnets: "${data.aws_subnets.selected.ids}",
           security_groups: [`\${aws_security_group.${resourceName}.id}`],
           tags: tagsFor(service.metadata),
         },
@@ -147,7 +148,7 @@ function awsEc2EcsResources(
           port: service.config.service.containerPort,
           protocol: "HTTP",
           target_type: "instance",
-          vpc_id: "${data.aws_vpc.default.id}",
+          vpc_id: "${data.aws_vpc.selected.id}",
           health_check: {
             path: service.config.healthCheck.path,
             protocol: "HTTP",
@@ -187,7 +188,7 @@ function awsEc2EcsResources(
           desired_capacity: desiredCapacity,
           min_size: service.config.cluster.autoscaling?.minCapacity ?? desiredCapacity,
           max_size: service.config.cluster.autoscaling?.maxCapacity ?? desiredCapacity,
-          vpc_zone_identifier: "${data.aws_subnets.default.ids}",
+          vpc_zone_identifier: "${data.aws_subnets.selected.ids}",
           launch_template: {
             id: `\${aws_launch_template.${resourceName}.id}`,
             version: "$Latest",
@@ -237,7 +238,7 @@ function awsEc2EcsResources(
         [resourceName]: {
           name: physicalServiceName,
           description: `Security group for ${physicalServiceName}`,
-          vpc_id: "${data.aws_vpc.default.id}",
+          vpc_id: "${data.aws_vpc.selected.id}",
           ingress: [
             {
               description: "Allow HTTP ingress",
@@ -281,19 +282,7 @@ function awsEc2EcsResources(
       ...ecsServiceAutoscalingResources(service, resourceName),
     },
     {
-      aws_vpc: {
-        default: {
-          default: true,
-        },
-      },
-      aws_subnets: {
-        default: {
-          filter: {
-            name: "vpc-id",
-            values: ["${data.aws_vpc.default.id}"],
-          },
-        },
-      },
+      ...vpcDataSources(service.metadata),
       aws_ssm_parameter: {
         ecs_optimized_ami: {
           name: "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id",
@@ -361,7 +350,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
           name: loadBalancerName,
           load_balancer_type: "application",
           internal: false,
-          subnets: "${data.aws_subnets.default.ids}",
+          subnets: "${data.aws_subnets.selected.ids}",
           tags: tagsFor(service.metadata),
         },
       },
@@ -371,7 +360,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
           port: service.config.service.containerPort,
           protocol: "HTTP",
           target_type: "ip",
-          vpc_id: "${data.aws_vpc.default.id}",
+          vpc_id: "${data.aws_vpc.selected.id}",
           health_check: {
             path: service.config.healthCheck.path,
             protocol: "HTTP",
@@ -395,19 +384,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
       },
     },
     {
-      aws_vpc: {
-        default: {
-          default: true,
-        },
-      },
-      aws_subnets: {
-        default: {
-          filter: {
-            name: "vpc-id",
-            values: ["${data.aws_vpc.default.id}"],
-          },
-        },
-      },
+      ...vpcDataSources(service.metadata),
     },
   );
 }
@@ -496,7 +473,7 @@ function awsFargateEcsResources(
           name: physicalServiceName,
           load_balancer_type: "application",
           internal: service.metadata.securityZone !== "public",
-          subnets: "${data.aws_subnets.default.ids}",
+          subnets: "${data.aws_subnets.selected.ids}",
           security_groups: [`\${aws_security_group.${resourceName}.id}`],
           tags: tagsFor(service.metadata),
         },
@@ -507,7 +484,7 @@ function awsFargateEcsResources(
           port: service.config.service.containerPort,
           protocol: "HTTP",
           target_type: "ip",
-          vpc_id: "${data.aws_vpc.default.id}",
+          vpc_id: "${data.aws_vpc.selected.id}",
           health_check: {
             path: service.config.healthCheck.path,
             protocol: "HTTP",
@@ -534,7 +511,7 @@ function awsFargateEcsResources(
           desired_count: service.config.service.desiredCount,
           launch_type: "FARGATE",
           network_configuration: {
-            subnets: "${data.aws_subnets.default.ids}",
+            subnets: "${data.aws_subnets.selected.ids}",
             security_groups: [`\${aws_security_group.${resourceName}.id}`],
             assign_public_ip: service.metadata.securityZone === "public",
           },
@@ -551,7 +528,7 @@ function awsFargateEcsResources(
         [resourceName]: {
           name: physicalServiceName,
           description: `Security group for ${physicalServiceName}`,
-          vpc_id: "${data.aws_vpc.default.id}",
+          vpc_id: "${data.aws_vpc.selected.id}",
           ingress: [
             {
               description: "Allow HTTP ingress",
@@ -595,19 +572,7 @@ function awsFargateEcsResources(
       ...ecsServiceAutoscalingResources(service, resourceName),
     },
     {
-      aws_vpc: {
-        default: {
-          default: true,
-        },
-      },
-      aws_subnets: {
-        default: {
-          filter: {
-            name: "vpc-id",
-            values: ["${data.aws_vpc.default.id}"],
-          },
-        },
-      },
+      ...vpcDataSources(service.metadata),
     },
   );
 }

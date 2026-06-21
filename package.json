@@ -9,7 +9,7 @@
     "docs:dev:floci": "./scripts/docs-dev-floci.sh",
     "docs:build": "pnpm --filter @repo/docs run build",
     "docs:docker:package": "pnpm docs:build && pnpm docs:docker:build",
-    "docs:docker:build": "docker build -f apps/docs/Dockerfile -t nebula-docs:local .",
+    "docs:docker:build": "docker build -f apps/Dockerfile --build-arg APP_NAME=docs --build-arg PORT=3001 -t nebula-docs:local .",
     "docs:reset": "pnpm --filter @repo/docs run reset",
     "lint": "oxlint --type-aware --type-check --deny-warnings .",
     "lint:fix": "oxlint --type-aware --type-check --deny-warnings --fix .",
@@ -38,7 +38,7 @@
     "floci:list:tables": "pnpm --filter @repo/platform run floci:list:tables",
     "payments:dev": "pnpm --filter @repo/payments run dev",
     "payments:build": "pnpm --filter @repo/payments run build",
-    "payments:docker:build": "docker build -f apps/payments/Dockerfile -t nebula-payments:local .",
+    "payments:docker:build": "docker build -f apps/Dockerfile --build-arg APP_NAME=payments --build-arg PORT=3002 -t nebula-payments:local .",
     "floci:deploy:payments": "./scripts/floci-deploy-payments.sh"
   },
   "dependencies": {
