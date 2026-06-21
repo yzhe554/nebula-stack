@@ -218,6 +218,10 @@ describe("terraformForService", () => {
       },
       depends_on: ["aws_lb_listener.docs_app"],
     });
+    expect(resource(flociTerraform, "aws_lb_listener", "docs_app")).toMatchObject({
+      port: 3001,
+      protocol: "HTTP",
+    });
     expect(resource(flociTerraform, "aws_lb_target_group", "docs_app")).toMatchObject({
       name_prefix: "docsa-",
       port: 3001,
@@ -598,6 +602,9 @@ describe("terraformForService", () => {
         serviceNames: {
           "docs-app": "dev-venture-core-public-docs-app",
         },
+        serviceContainerPorts: {
+          "docs-app": 3001,
+        },
       }),
     );
 
@@ -605,7 +612,7 @@ describe("terraformForService", () => {
       resource(flociTerraform, "aws_apigatewayv2_integration", "docs_ingress_ecs_docs"),
     ).toMatchObject({
       integration_type: "HTTP_PROXY",
-      integration_uri: "http://${data.aws_lb.docs_app.dns_name}/docs",
+      integration_uri: "http://${data.aws_lb.docs_app.dns_name}:3001/docs",
     });
     expect(data(flociTerraform, "aws_lb", "docs_app")).toEqual({
       name: "dev-venture-core-public-docs-app",

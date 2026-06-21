@@ -19,10 +19,18 @@ deploy_docs_gateway() {
   pnpm platform:deploy -- --env dev --venture venture --target floci --services docs
 }
 
+deploy_docs_app() {
+  pnpm platform:deploy -- --env dev --venture venture --target floci --services docs-app
+}
+
 current_api_id="$(api_id)"
 
 if [[ -z "$current_api_id" || "$current_api_id" == "None" ]]; then
-  echo "Docs API Gateway not found. Bootstrapping docs API Gateway first..."
+  echo "Docs API Gateway not found. Bootstrapping docs ECS app and API Gateway first..."
+  echo "Building temporary docs image without API Gateway asset prefix..."
+  pnpm docs:build
+  pnpm docs:docker:build
+  deploy_docs_app
   deploy_docs_gateway
   current_api_id="$(api_id)"
 fi

@@ -1,11 +1,9 @@
 .git
-**/.next
-!apps/docs/.next
-!apps/docs/.next/standalone
-!apps/docs/.next/static
-!apps/docs/.next/static/**
+**/.next/**
 **/.turbo
-**/node_modules
+node_modules
+apps/*/node_modules
+packages/*/node_modules
 **/dist
 **/dist-ts
 **/__generated__
@@ -13,4 +11,9 @@
 .terraform-provider-mirror
 .terraformrc.local
 .env.local
-!apps/docs/.next/standalone/**
+
+!apps/*/.next/
+!apps/*/.next/standalone/
+!apps/*/.next/standalone/**
+!apps/*/.next/static/
+!apps/*/.next/static/**

@@ -4,6 +4,7 @@ import { discoverServices } from "./service-discovery";
 import { generatedDirectoryForService } from "./generated-paths";
 import { terraformForService, type DeployTarget } from "./terraform";
 import { validateServiceReferences } from "./validate";
+import type { LoadedService } from "./types";
 
 const args = parseArgs(process.argv.slice(2));
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -26,6 +27,7 @@ const scopedServices = await discoverServices({
 });
 validateServiceReferences(scopedServices);
 const serviceNames = serviceNamesFor(scopedServices);
+const serviceContainerPorts = serviceContainerPortsFor(scopedServices);
 const target = args.target ?? "aws";
 
 for (const service of services) {
@@ -33,12 +35,28 @@ for (const service of services) {
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(
     path.join(outputDirectory, "main.tf.json"),
-    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames }), null, 2)}\n`,
+    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames, serviceContainerPorts }), null, 2)}\n`,
     "utf8",
   );
   console.log(
     `Generated ${path.relative(repoRoot, outputDirectory)}/main.tf.json from ${path.relative(repoRoot, service.metadata.sourcePath)}`,
   );
+}
+
+function serviceContainerPortsFor(
+  loadedServices: Awaited<ReturnType<typeof discoverServices>>,
+): Record<string, number> {
+  return Object.fromEntries(
+    loadedServices
+      .filter(isEcsService)
+      .map((service) => [service.metadata.serviceName, service.config.service.containerPort]),
+  );
+}
+
+function isEcsService(
+  service: LoadedService,
+): service is Extract<LoadedService, { metadata: { serviceType: "ecs" } }> {
+  return service.metadata.serviceType === "ecs";
 }
 
 function serviceNamesFor(

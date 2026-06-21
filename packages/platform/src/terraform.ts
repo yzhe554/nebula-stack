@@ -13,6 +13,7 @@ export type TerraformOptions = {
   target?: DeployTarget;
   moduleDirectory?: string;
   serviceNames?: Record<string, string>;
+  serviceContainerPorts?: Record<string, number>;
   domainCertificateArns?: Record<string, string>;
 };
 
@@ -223,6 +224,7 @@ function awsEc2EcsResources(
   options: TerraformOptions,
 ): TerraformJson {
   const physicalServiceName = physicalName(service.metadata);
+  const loadBalancerName = ecsLoadBalancerName(service.metadata);
   const roleName = `${resourceName}_task_execution_role`;
   const instanceRoleName = `${resourceName}_instance_role`;
   const desiredCapacity = service.config.cluster.desiredCapacity ?? 1;
@@ -325,7 +327,7 @@ function awsEc2EcsResources(
       },
       aws_lb: {
         [resourceName]: {
-          name: physicalServiceName,
+          name: loadBalancerName,
           load_balancer_type: "application",
           internal: service.metadata.securityZone !== "public",
           subnets: "${data.aws_subnets.default.ids}",
@@ -335,7 +337,7 @@ function awsEc2EcsResources(
       },
       aws_lb_target_group: {
         [resourceName]: {
-          name: physicalServiceName,
+          name: loadBalancerName,
           port: service.config.service.containerPort,
           protocol: "HTTP",
           target_type: "instance",
@@ -497,6 +499,7 @@ function awsEc2EcsResources(
 
 function flociEcsResources(service: EcsService, resourceName: string): TerraformJson {
   const physicalServiceName = physicalName(service.metadata);
+  const loadBalancerName = ecsLoadBalancerName(service.metadata);
 
   return baseTerraform(
     service.metadata,
@@ -549,7 +552,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
       },
       aws_lb: {
         [resourceName]: {
-          name: physicalServiceName,
+          name: loadBalancerName,
           load_balancer_type: "application",
           internal: false,
           subnets: "${data.aws_subnets.default.ids}",
@@ -576,7 +579,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
       aws_lb_listener: {
         [resourceName]: {
           load_balancer_arn: `\${aws_lb.${resourceName}.arn}`,
-          port: 80,
+          port: service.config.service.containerPort,
           protocol: "HTTP",
           default_action: {
             type: "forward",
@@ -1018,7 +1021,7 @@ function apiGatewayEcsTargetData(
               serviceName,
               options,
               "apigateway route references unknown ECS service",
-            ),
+            ).slice(0, 32),
           },
         ];
       }),
@@ -1144,7 +1147,11 @@ function apiGatewayIntegrationUri(
 
   if (route.resolvedTarget.type === "ecs") {
     const resourceName = ecsResourceNameForService(route.resolvedTarget.service, options);
-    return `http://\${data.aws_lb.${resourceName}.dns_name}${apiGatewayIntegrationPath(route.path)}`;
+    const port =
+      options.target === "floci"
+        ? `:${ecsContainerPortForService(route.resolvedTarget.service, options)}`
+        : "";
+    return `http://\${data.aws_lb.${resourceName}.dns_name}${port}${apiGatewayIntegrationPath(route.path)}`;
   }
 
   const lambdaName = lambdaNameForService(route.resolvedTarget.service, options);
@@ -1170,6 +1177,27 @@ function serviceNameFor(serviceName: string, options: TerraformOptions, message:
   }
 
   throw new Error(`${message} ${serviceName}`);
+}
+
+function ecsContainerPortForService(serviceName: string, options: TerraformOptions): number {
+  const configuredPort = options.serviceContainerPorts?.[serviceName];
+  if (configuredPort) {
+    return configuredPort;
+  }
+
+  throw new Error(`apigateway route references ECS service without container port ${serviceName}`);
+}
+
+function ecsLoadBalancerName(metadata: ServiceMetadata): string {
+  return truncateName(physicalName(metadata), 32);
+}
+
+function truncateName(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return value.slice(0, maxLength);
 }
 
 function apiGatewayIntegrationPath(routePath: string): string {

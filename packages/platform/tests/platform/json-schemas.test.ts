@@ -80,6 +80,18 @@ describe("service JSON schemas", () => {
     expect(validate(yaml), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
 
+  test("api gateway schema validates the payments app API Gateway YAML", async () => {
+    const validate = await compileSchema("schemas/apigateway.schema.json");
+    const yaml = parse(
+      await readFile(
+        "../../infra/services/dev/venture/core/public/payments.apigateway.yaml",
+        "utf8",
+      ),
+    );
+
+    expect(validate(yaml), JSON.stringify(validate.errors, null, 2)).toBe(true);
+  });
+
   test("ecs schema validates the sample ECS YAML", async () => {
     const validate = await compileSchema("schemas/ecs.schema.json");
     const yaml = parse(

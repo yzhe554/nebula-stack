@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../../../../packages/platform/schemas/apigateway.schema.json
+description: Payments app public ingress.
+routes:
+  - path: /payments
+    method: ANY
+    target:
+      type: ecs
+      service: payments-app
+  - path: /payments/{proxy+}
+    method: ANY
+    target:
+      type: ecs
+      service: payments-app
