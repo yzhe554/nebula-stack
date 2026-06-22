@@ -6,7 +6,7 @@
     "setup:local": "./scripts/setup-local.sh",
     "build": "turbo build",
     "docs:dev": "pnpm --filter @repo/docs run dev",
-    "docs:dev:floci": "./scripts/docs-dev-floci.sh",
+    "docs:dev:floci": "pnpm --filter @repo/platform run floci:dev -- docs-app",
     "docs:build": "pnpm --filter @repo/docs run build",
     "docs:docker:package": "pnpm docs:build && pnpm docs:docker:build",
     "docs:docker:build": "docker build -f apps/Dockerfile --build-arg APP_NAME=docs --build-arg PORT=3001 -t nebula-docs:local .",
@@ -25,9 +25,9 @@
     "platform:validate": "pnpm --filter @repo/platform run validate",
     "floci:up": "floci start",
     "floci:down": "floci stop",
-    "floci:url": "./scripts/floci-url.sh",
+    "floci:url": "pnpm --filter @repo/platform run floci:url",
     "floci:deploy": "pnpm platform:deploy -- --env dev --venture venture --target floci",
-    "floci:deploy:docs": "./scripts/floci-deploy-docs.sh",
+    "floci:deploy:docs": "pnpm --filter @repo/platform run floci:deploy:service -- docs-app",
     "floci:deploy:all": "pnpm floci:deploy:payments && pnpm floci:deploy:docs",
     "floci:reset:all": "pnpm --filter @repo/platform run floci:reset:all",
     "floci:redeploy:all": "pnpm floci:reset:all && pnpm floci:deploy:all",
@@ -39,7 +39,7 @@
     "payments:dev": "pnpm --filter @repo/payments run dev",
     "payments:build": "pnpm --filter @repo/payments run build",
     "payments:docker:build": "docker build -f apps/Dockerfile --build-arg APP_NAME=payments --build-arg PORT=3002 -t nebula-payments:local .",
-    "floci:deploy:payments": "./scripts/floci-deploy-payments.sh"
+    "floci:deploy:payments": "pnpm --filter @repo/platform run floci:deploy:service -- payments-app"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1072.0",

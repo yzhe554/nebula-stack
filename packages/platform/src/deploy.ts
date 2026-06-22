@@ -32,6 +32,7 @@ run(
     "--target",
     target,
     ...(args.services.length > 0 ? ["--services", args.services.join(",")] : []),
+    ...args.imageTags.flatMap((imageTag) => ["--image-tag", imageTag]),
   ],
   repoRoot(),
 );
@@ -46,8 +47,39 @@ const services = await discoverServices({
 for (const service of [...services].sort(compareDeployOrder)) {
   const cwd = generatedDirectoryForService(service.metadata, target);
   run("terraform", ["init"], cwd);
-  run("terraform", ["plan", "-out=tfplan"], cwd);
-  run("terraform", ["apply", "tfplan"], cwd);
+  applyWithRetry(cwd, target);
+}
+
+// Floci (LocalStack) intermittently fails the read-back of freshly-created
+// resources — notably the AWSLambdaVPCAccessExecutionRole policy attachment,
+// which errors with "empty result" even though it was created. A plain re-plan
+// + re-apply succeeds. Retry only on this transient signature for the floci
+// target; never mask real errors or retry on aws.
+function applyWithRetry(cwd: string, deployTarget: DeployTarget): void {
+  const maxAttempts = deployTarget === "floci" ? 3 : 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    run("terraform", ["plan", "-out=tfplan"], cwd);
+    const result = runCapturing("terraform", ["apply", "tfplan"], cwd);
+
+    if (result.status === 0) {
+      return;
+    }
+
+    const transient = isTransientFlociError(result.output);
+    if (attempt < maxAttempts && transient) {
+      console.warn(
+        `terraform apply hit a transient Floci error in ${cwd} (attempt ${attempt}/${maxAttempts}); re-planning and retrying.`,
+      );
+      continue;
+    }
+
+    throw new Error(`Command failed: terraform apply tfplan in ${cwd}`);
+  }
+}
+
+function isTransientFlociError(output: string): boolean {
+  return /empty result|ResourceNotFoundException|reading IAM Role Policy Attachment/i.test(output);
 }
 
 function compareDeployOrder(
@@ -70,9 +102,17 @@ function parseArgs(argv: string[]): {
   venture?: string;
   target?: DeployTarget;
   services: string[];
+  imageTags: string[];
 } {
-  const parsed: { env?: string; venture?: string; target?: DeployTarget; services: string[] } = {
+  const parsed: {
+    env?: string;
+    venture?: string;
+    target?: DeployTarget;
+    services: string[];
+    imageTags: string[];
+  } = {
     services: [],
+    imageTags: [],
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -109,6 +149,12 @@ function parseArgs(argv: string[]): {
       continue;
     }
 
+    if (arg === "--image-tag") {
+      parsed.imageTags.push(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -134,6 +180,27 @@ function run(command: string, commandArgs: string[], cwd: string): void {
   if (result.status !== 0) {
     throw new Error(`Command failed: ${command} ${commandArgs.join(" ")}`);
   }
+}
+
+// Like run(), but captures combined stdout/stderr (while still echoing it) and
+// returns the status + output instead of throwing, so callers can inspect the
+// failure (e.g. to detect transient Floci errors worth retrying).
+function runCapturing(
+  command: string,
+  commandArgs: string[],
+  cwd: string,
+): { status: number; output: string } {
+  console.log(`Running: ${command} ${commandArgs.join(" ")} in ${cwd}`);
+  const result = spawnSync(command, commandArgs, {
+    cwd,
+    encoding: "utf8",
+    env: localEnvironment(),
+  });
+
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  process.stdout.write(output);
+
+  return { status: result.status ?? 1, output };
 }
 
 function localEnvironment(): NodeJS.ProcessEnv {

@@ -1,56 +1,67 @@
-# TS CLI Replaces Shell Scripts Implementation Plan
+# TS CLI Replaces Shell Scripts Implementation Plan (Plan 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the hand-maintained Floci shell scripts (`floci-deploy-docs.sh`, `floci-deploy-payments.sh`, `floci-url.sh`, `docs-dev-floci.sh`, `floci-reset-all.sh`) with TypeScript CLI commands that derive every name, app, gateway link, and resource from the service manifest (Plans 2–4), so adding a service requires no shell edits. The CLI uses the AWS SDK (already a dependency) instead of the `aws` CLI.
+> **REWRITTEN 2026-06-22** against the post-Spec-A/B/C codebase. The original draft predated the VPC work and assumed the now-obsolete Plan 4 (ECS `env`/`ref`). All references to `payment-api-ingress`, `PAYMENT_API_BASE_URL`, `resolveEcsEnv`, and `resolvedEcsEnv` have been removed. The demo now deploys a `network` module first and the payments app invokes the Lambda via the AWS SDK (no API Gateway in front).
 
-**Architecture:** A small command layer under `src/cli/` exposes `floci-deploy`, `floci-url`, `floci-reset`, and `floci-dev`, each reading `loadServiceManifest()` and acting generically. `floci-deploy` reproduces the existing bootstrap ordering (deploy gateway → discover its API id → host-build the app with the gateway path → docker build → deploy app/stack → resolve ECS env refs → force new ECS deployment). `floci-url` and `floci-reset` enumerate resources from the manifest. AWS interactions go through `@aws-sdk/client-*` against the Floci endpoint with a scrubbed (no-proxy) environment. `package.json` per-service script entries collapse to generic ones. The five shell scripts are deleted.
+**Goal:** Replace the hand-maintained Floci shell scripts with TypeScript CLI commands that derive every resource name from the service manifest, so adding a service — or a new resource type on an existing service — requires no shell edits. This directly fixes the class of bug seen on 2026-06-22, where `floci-reset-all.sh` didn't know about Spec C's Lambda security group + ECS task role and broke `redeploy:all`.
 
-**Tech Stack:** TypeScript (ESM, `tsx`), AWS SDK v3, `node:child_process` (docker/terraform/pnpm spawns), Vitest.
+**Architecture:** A command layer under `src/cli/` exposes `floci-deploy`, `floci-url`, `floci-reset`, and `floci-dev`, each reading `loadServiceManifest()` and acting generically. A pure `planResetTargets(manifest)` enumerates teardown targets (gateways, ECS svc/cluster/ALB/target-groups, Lambda fn/role/policies/log-group/SG, ECS task roles, DDB tables, generated state dirs) **derived from service configs**, so new resource types are covered by reading the manifest, not by editing hardcoded lists. AWS calls go through `@aws-sdk/client-*` against the Floci endpoint with a scrubbed (no-proxy) environment. The four orchestration shell scripts are deleted; DDB helpers stay.
 
-**This is Plan 5 of the 5-plan sequence** (plugins ✅ → registry → app/Dockerfile → ECS env → **TS CLI**). Hard dependency on Plans 2, 3, and 4 being applied first (manifest names, `app` field, ECS `env` block + resolver).
+**Tech Stack:** TypeScript (ESM, `tsx`), AWS SDK v3 (user-confirmed), `node:child_process` (docker/terraform/pnpm spawns), Vitest.
 
 ---
 
-## Optimization goal: eliminate the redundant Next.js build (investigated)
+## Optimization goal: eliminate the redundant Next.js build (carried over, still valid)
 
-The current shell scripts build each Next.js app **twice** on a cold deploy (verified): once as a throwaway image to stand up the ECS app/ALB, then again with the real gateway path. A full cold `floci:deploy:all` does ~4 `next build` + 4 `docker build` (2 per app × 2 apps). This CLI must reduce that to **one real build per app**.
+Cold `floci:deploy:all` currently builds each Next app **twice** (throwaway image to stand up the ALB, then real build with the gateway path). Root cause (unchanged, investigated): `assetPrefix = NEXT_PUBLIC_GATEWAY_PATH + basePath` is baked at `next build` (standalone output, no runtime hook); the gateway id only exists after the gateway is deployed; and the gateway's ECS integration reads the ALB by name, so the ALB (hence the ECS app) must exist first. Floci-only (AWS uses a custom domain, single build).
 
-Root cause (investigated — do NOT try to make it runtime):
-- `next.config.ts` sets `assetPrefix = NEXT_PUBLIC_GATEWAY_PATH + basePath`. With `output: "standalone"`, Next bakes `assetPrefix` into `/_next/static/...` URLs at **build time** — there is no runtime hook. So the gateway-path → assetPrefix coupling is inherently build-time. (Unlike `PAYMENT_API_BASE_URL`, which Plan 3 correctly moved to runtime because it's just data the app reads.)
-- Two coupled cycles force the ordering: (a) the app image needs the gateway id for `assetPrefix` → gateway must exist; (b) the gateway's ECS integration reads the ALB via `data.aws_lb.<name>` (by-name lookup) → the ALB (created by the ECS app) must exist first. Hence: ECS app/ALB up → gateway minted → rebuild app with id.
-- This is **Floci-only**. On AWS the gateway uses a custom domain (no `/execute-api/<id>/$default` prefix), so `NEXT_PUBLIC_GATEWAY_PATH` is unset, `assetPrefix` is undefined, and a single build already works. Do not change the AWS path.
-
-Required behavior in `floci-deploy` (Task 5): the throwaway build must NOT be a full `next build`. Instead bootstrap the ECS app/ALB with a **cheap placeholder image** (e.g. reuse the last-built image if present, or a minimal image just to create the ALB), THEN deploy the gateway to mint the id, THEN do exactly **one** real `pnpm <app>:build` + `docker build` with the gateway path, then redeploy + force-new-deployment. Net: one real Next build per app on cold deploy, zero on the AWS path. Task 5 Step 3 below is updated to reflect this; if implementing the placeholder bootstrap proves large, the acceptable fallback is to still build once by deploying the gateway FIRST using a pre-existing/cached image for the ALB — document whichever you choose.
+`floci-deploy` must do **one** real `next build` per app: bootstrap the ECS app/ALB with a placeholder/cached image (no full build), deploy the gateway to mint the id, then the single real build + redeploy. Fallback if the placeholder bootstrap is large: deploy the gateway first reusing a pre-existing `<image>:local`. AWS path skips the bootstrap entirely.
 
 ---
 
 ## Ground Rules
 
-- Run from `packages/platform/`. Test: `pnpm test`; repo-root `pnpm lint` + `pnpm typecheck` clean.
-- **oxlint forbids `no-unsafe-type-assertion`** — guards over `as T`.
-- **Do not commit** — stage + report; user commits.
-- This plan changes runtime tooling, not Terraform generation. The byte-identical Terraform gate must still hold (the CLI calls the same `terraformForService`).
-- **Pre-req gate (Task 0):** Plans 2, 3, 4 MUST be applied. Verify `src/registry.ts` exports `loadServiceManifest`/`ServiceManifestEntry` with `app`, `ecs`, `frontedByGateway`; `src/services/ecs/env.ts` exports `resolveEcsEnv`; `TerraformContext` has `resolvedEcsEnv`; `apps/Dockerfile` exists; `apps/payments/app/page.tsx` reads `PAYMENT_API_BASE_URL`. If any is missing, STOP and report which plan is outstanding.
-- **AWS SDK availability:** `@aws-sdk/client-dynamodb` is already a dependency. This plan adds `@aws-sdk/client-apigatewayv2`, `@aws-sdk/client-ecs`, `@aws-sdk/client-elastic-load-balancing-v2`, `@aws-sdk/client-iam`, `@aws-sdk/client-cloudwatch-logs`, `@aws-sdk/client-lambda` to `@repo/platform`. Confirm with the user before adding deps if they prefer to keep using the `aws` CLI via spawn — see Task 1 decision point.
+- Run platform commands from `packages/platform/`; `pnpm lint` + `pnpm typecheck` from repo ROOT (or `--filter @repo/platform`).
+- **oxlint forbids `typescript/no-unsafe-type-assertion`** — type guards, not `as T`. Reuse existing accessor patterns in tests.
+- **Do not `git commit`.** Each "Commit" step = `git add` + report; the user commits.
+- This plan changes runtime tooling, NOT Terraform generation — the platform unit suite (currently 121 tests) and byte-identical generated output must stay green (the CLI calls the same `terraformForService`/`platform:deploy`).
+- Floci endpoint nuance (learned in Spec C): host→Floci is `http://localhost:4566`; container→Floci is `http://host.docker.internal:4566`. The CLI runs on the **host**, so SDK clients use `http://localhost:4566`.
 
-## Background: what the shell scripts do (verified — must be reproduced)
+## Pre-req gate (Task 0)
 
-- **`floci-deploy-docs.sh` / `floci-deploy-payments.sh`:** (1) look up the public gateway's API id by name via `apigatewayv2 get-apis`; (2) if missing, bootstrap: build app + docker image, deploy `<app>` (ECS) then `<gateway>`; (3) host-build the app with `NEXT_PUBLIC_GATEWAY_PATH=/execute-api/<id>/$default` (payments also set `NEXT_PUBLIC_PAYMENT_API_BASE_URL` — now replaced by the runtime `PAYMENT_API_BASE_URL` ECS env from Plan 3/4); (4) docker build; (5) `platform:deploy` the stack; (6) `ecs update-service --force-new-deployment`; (7) print URLs.
-- **`floci-url.sh`:** for docs/payments/payment-api, resolve API ids (via get-apis, fallback to tfstate), ALB DNS (from tfstate), print a set of URLs; missing services show "Not deployed".
-- **`floci-reset-all.sh`:** delete (idempotently, ignoring not-found) all API gateways, ECS services+clusters (docs + payments), ALBs+listeners+target groups (docs + payments), the payment-api Lambda + role + inline policy + basic-exec attach + log group, run `floci-ddb-reset.sh`, and `rm -rf` the generated floci state dirs.
-- **`docs-dev-floci.sh`:** resolve the docs gateway id, export `NEXT_PUBLIC_GATEWAY_PATH`, run `pnpm --filter @repo/docs dev`.
-- **`floci-env.sh`** (sourced by kept scripts): sets `AWS_ACCESS_KEY_ID=test` etc. and unsets proxies. The CLI must replicate this scrubbed env for SDK + spawned processes.
-- **KEPT (not replaced by this plan):** `floci-ddb-get-item.sh`, `floci-ddb-list-tables.sh`, `floci-ddb-reset.sh`, `floci-invoke-payment-api.sh`, `floci-env.sh`. `floci-reset-all.sh`'s teardown calls `floci-ddb-reset.sh` — the TS reset must invoke the same DDB reset (spawn it, or port it; spawning keeps scope tight).
+Verify against CURRENT code (post Spec A/B/C):
+```bash
+cd packages/platform
+grep -q "loadServiceManifest" src/registry.ts && echo "manifest ok"
+grep -q "AppMetadata" src/registry.ts && echo "app field ok"
+grep -q "frontedByGateway" src/registry.ts && echo "gateway link ok"
+test -f ../../apps/Dockerfile && echo "shared dockerfile ok"
+grep -q "PAYMENT_API_FUNCTION_NAME\|permissions" src/services/ecs/terraform.ts && echo "ecs permissions ok"
+```
+Expected: all "ok". (Note: there is intentionally NO `src/services/ecs/env.ts` / `resolvedEcsEnv` — Plan 4 was abandoned. Do not look for them.)
 
-## Naming the CLI derives from the manifest (no hardcoding)
+## Background: current shell scripts (verified 2026-06-22)
 
-- Gateway API name to look up = `entry.physicalName` for apigateway services (e.g. `dev-venture-core-public-docs`).
-- For an app service, its fronting gateway = `entry.frontedByGateway` (Plan 2).
-- ECS cluster/service name = `entry.ecs.clusterName` (= physicalName); ALB name = `entry.ecs.albName`; target-group prefix = `entry.ecs.targetGroupPrefix`.
-- App build command/dir/dockerfile/port = `entry.app` (Plan 3).
-- Generated state dir = `generatedDirectoryForService(metadata, "floci")`.
-- Lambda function name, role, log group = `entry.physicalName` + suffixes already encoded in the lambda emitter (`physicalName(metadata)`, `${physicalName}-lambda-role`, `/aws/lambda/${physicalName}`). Confirm exact suffixes by reading `src/services/lambda/terraform.ts` before implementing reset.
+- **`scripts/floci-deploy-docs.sh`** — looks up docs gateway id; bootstraps docs-app+docs if missing; builds docs with `NEXT_PUBLIC_GATEWAY_PATH`; docker build; `platform:deploy docs-app,docs`; force-new-deployment; prints URLs.
+- **`scripts/floci-deploy-payments.sh`** (updated in Spec C) — bootstraps **network,customer-records,payment-api** (lambda, in-VPC; no ingress) if the Lambda is absent; builds payments with `NEXT_PUBLIC_GATEWAY_PATH` only (no payment-api URL); docker build; `platform:deploy payments-app,payments`; force-new-deployment; prints URLs. The payments server reaches the Lambda via SDK using `PAYMENT_API_FUNCTION_NAME` (ECS task env from `permissions.lambda`).
+- **`scripts/floci-url.sh`** (updated in Spec C) — resolves docs + payments gateway ids + ALB DNS; prints URLs; payment-api shows "invoked privately via SDK" (no gateway).
+- **`scripts/docs-dev-floci.sh`** — resolves docs gateway id, exports `NEXT_PUBLIC_GATEWAY_PATH`, runs `pnpm --filter @repo/docs dev`.
+- **`packages/platform/scripts/floci-reset-all.sh`** (updated in Spec C) — idempotently deletes: API gateways (docs, payments), ECS svc/cluster (docs-app, payments-app), ALBs+listeners+target-groups (docs + payments prefixes), Lambda fn + basic-exec detach + **vpc-access detach** + inline dynamodb policy + role + log group + **lambda SG** + **payments ECS task role + inline policy**, runs `floci-ddb-reset.sh`, `rm -rf` generated floci state dirs (NOT the network module dir). **This is the script whose hand-maintenance the CLI eliminates.**
+- **KEPT (not replaced):** `floci-ddb-get-item.sh`, `floci-ddb-list-tables.sh`, `floci-ddb-reset.sh`, `floci-invoke-payment-api.sh`, `floci-env.sh`. `reset.ts` spawns the kept `floci-ddb-reset.sh`.
+- **The `network` module is never torn down by reset** — it persists across redeploys (idempotent re-apply). The CLI must preserve this (reset does NOT delete the VPC/subnets/SGs/endpoints; it does not remove the network generated-state dir).
+
+## Resource-name derivation (from manifest + emitter suffixes — no hardcoding)
+
+For each manifest entry, derive teardown/deploy names. Suffixes are fixed by the emitters (confirm by reading `src/services/lambda/terraform.ts` and `src/services/ecs/terraform.ts`):
+
+- **apigateway** entry → gateway API name = `entry.physicalName`.
+- **ecs** entry → cluster name = service name = `entry.ecs.clusterName` (= physicalName); ALB name = `entry.ecs.albName`; target-group prefix = `entry.ecs.targetGroupPrefix`. If `entry.service.config.permissions?.lambda?.length` → also a task role `${physicalName}-task-role` + inline policy `${physicalName}-lambda-invoke`.
+- **lambda** entry → function = `entry.physicalName`; role = `${physicalName}-lambda-role`; log group = `/aws/lambda/${physicalName}`; security group = `${physicalName}-sg`; managed attachments = basic-exec + `AWSLambdaVPCAccessExecutionRole`; inline dynamodb policy `${physicalName}-dynamodb-access` (only if `permissions.dynamodb.length`).
+- **app-backed** entry (`entry.app`) → build command `pnpm --filter ${app.packageName} build`, docker build via shared `apps/Dockerfile` with `APP_NAME=${app.base}` / `PORT=${app.devPort}`, image `<image.repository>:<tag>` from the ecs config.
+- generated state dir = `generatedDirectoryForService(metadata, "floci")`.
+
+> Deriving these in a pure `planResetTargets`/`planDeploy` from the manifest is the whole point: when a future service type adds a resource, you teach the planner once (keyed off config), and every command benefits. No more "reset forgot the new SG."
 
 ---
 
@@ -58,71 +69,48 @@ Required behavior in `floci-deploy` (Task 5): the throwaway build must NOT be a 
 
 ```
 packages/platform/src/cli/
-  floci-env.ts        # scrubbed env + Floci endpoint constant + AWS SDK client factory
-  aws.ts              # thin SDK wrappers: getApiIdByName, forceNewDeployment, delete* helpers
-  deploy.ts           # floci-deploy command (bootstrap + build + deploy + restart)
-  url.ts              # floci-url command
-  reset.ts            # floci-reset command
-  dev.ts              # floci-dev command
-packages/platform/tests/platform/cli-*.test.ts   # unit tests for pure logic (URL building, resolution, planning)
-package.json (root)   # MODIFIED: generic script entries; remove per-service shell entries
-packages/platform/package.json  # MODIFIED: new deps; new bin/script entries
-scripts/floci-deploy-docs.sh        # DELETED
-scripts/floci-deploy-payments.sh    # DELETED
-scripts/floci-url.sh                # DELETED
-scripts/docs-dev-floci.sh           # DELETED
-packages/platform/scripts/floci-reset-all.sh  # DELETED
+  floci-env.ts     # scrubbedEnv() + FLOCI_ENDPOINT + flociClientConfig()
+  aws.ts           # typed SDK wrappers (getApiIdByName, forceNewEcsDeployment, delete* — idempotent)
+  reset.ts         # planResetTargets(manifest) [pure] + runFlociReset() [imperative]
+  url.ts           # buildServiceUrls(...) [pure] + runFlociUrl() [imperative]
+  deploy.ts        # gatewayPathFor/buildArgsFor [pure] + runFlociDeploy(serviceName) [imperative]
+  dev.ts           # runFlociDev(serviceName)
+packages/platform/tests/platform/
+  cli-env.test.ts  cli-reset.test.ts  cli-url.test.ts  cli-deploy.test.ts
+packages/platform/package.json  # new deps + script entries (floci:url/reset:all/deploy:service/dev)
+package.json (root)             # generic entries; remove the 4 deploy/url/dev shell entries
+scripts/floci-deploy-docs.sh        DELETED
+scripts/floci-deploy-payments.sh    DELETED
+scripts/floci-url.sh                DELETED
+scripts/docs-dev-floci.sh           DELETED
+packages/platform/scripts/floci-reset-all.sh  DELETED
 ```
-
-> SCOPE NOTE: This is the largest plan. It is structured so each command is independently testable. Pure logic (URL construction, env resolution, reset target enumeration) is unit-tested; the imperative AWS/docker/terraform orchestration is verified by the live `floci:redeploy:all` end-to-end run (Task 9), mirroring `docs/verify-redeploy-after-plugin-refactor.md`.
 
 ---
 
-### Task 0: Pre-req verification + dependency decision
+### Task 0: Pre-req gate + dependencies
 
-- [ ] **Step 1: Verify Plans 2–4 are applied**
-
-Run:
+- [ ] **Step 1:** Run the pre-req gate commands above; confirm all "ok".
+- [ ] **Step 2: Add AWS SDK deps** (user confirmed SDK over `aws` CLI):
 ```bash
-cd packages/platform
-grep -q "loadServiceManifest" src/registry.ts && echo "P2 ok"
-grep -q "app?" src/registry.ts || grep -q "AppMetadata" src/registry.ts && echo "P3 ok"
-test -f src/services/ecs/env.ts && echo "P4 resolver ok"
-grep -q "resolvedEcsEnv" src/terraform/context.ts && echo "P4 context ok"
-test -f ../../apps/Dockerfile && echo "P3 dockerfile ok"
+pnpm --filter @repo/platform add @aws-sdk/client-apigatewayv2 @aws-sdk/client-ecs @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-iam @aws-sdk/client-cloudwatch-logs @aws-sdk/client-ec2 @aws-sdk/client-lambda
 ```
-Expected: all "ok". If any missing, STOP — report which plan to apply first.
-
-- [ ] **Step 2: Decide AWS interaction mechanism (ask the user)**
-
-The spec says use the AWS SDK. But the kept scripts and reset involve many services. Present to the user: **(A)** add the AWS SDK client packages listed above (cleaner, typed, matches spec), or **(B)** spawn the `aws` CLI from TS with the scrubbed env (no new deps, closer to current behavior, but stringly-typed). Recommend A per the spec. Wait for the answer; implement accordingly. The rest of this plan assumes **A**; if B is chosen, replace SDK calls with `spawnSync("aws", [...])` wrappers in `aws.ts` keeping the same function signatures so other tasks are unaffected.
-
-- [ ] **Step 3: (If A) add dependencies**
-
-Add to `packages/platform/package.json` dependencies and install:
-```bash
-pnpm --filter @repo/platform add @aws-sdk/client-apigatewayv2 @aws-sdk/client-ecs @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-iam @aws-sdk/client-cloudwatch-logs @aws-sdk/client-lambda
-```
-Confirm `pnpm install` succeeds. Commit checkpoint (stage package.json + lockfile; report).
+(`@aws-sdk/client-ec2` is needed for the Lambda security-group teardown by name. `@aws-sdk/client-dynamodb` already present.)
+- [ ] **Step 3:** Commit checkpoint — stage `packages/platform/package.json` + `pnpm-lock.yaml`; report.
 
 ---
 
-### Task 1: `floci-env.ts` — scrubbed environment + client factory
+### Task 1: `floci-env.ts` — scrubbed env + client factory
 
-**Files:**
-- Create: `packages/platform/src/cli/floci-env.ts`
-- Create: `packages/platform/tests/platform/cli-env.test.ts`
-
-Replicates `floci-env.sh`: a function returning the scrubbed env (test creds, region, proxies unset) for spawned processes, plus the Floci endpoint URL constant and a helper to build SDK clients pointed at Floci.
+**Files:** Create `src/cli/floci-env.ts`, `tests/platform/cli-env.test.ts`
 
 - [ ] **Step 1: Failing test**
-
 ```ts
 import { describe, expect, test } from "vitest";
 import { scrubbedEnv, FLOCI_ENDPOINT } from "../../src/cli/floci-env";
 
 describe("floci scrubbed env", () => {
-  test("sets test creds and region", () => {
+  test("sets test creds + region, keeps PATH", () => {
     const env = scrubbedEnv({ HTTP_PROXY: "http://corp", PATH: "/usr/bin" });
     expect(env.AWS_ACCESS_KEY_ID).toBe("test");
     expect(env.AWS_DEFAULT_REGION).toBe("us-east-1");
@@ -134,27 +122,21 @@ describe("floci scrubbed env", () => {
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.http_proxy).toBeUndefined();
   });
-  test("endpoint is the floci localstack url", () => {
+  test("host-side endpoint", () => {
     expect(FLOCI_ENDPOINT).toBe("http://localhost:4566");
   });
 });
 ```
-
-- [ ] **Step 2: Run, confirm FAIL.**
-
+- [ ] **Step 2: Run, FAIL.**
 - [ ] **Step 3: Implement**
-
 ```ts
-// packages/platform/src/cli/floci-env.ts
+// src/cli/floci-env.ts
 export const FLOCI_ENDPOINT = "http://localhost:4566";
-
 const PROXY_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"];
 
 export function scrubbedEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
-  for (const key of PROXY_KEYS) {
-    delete env[key];
-  }
+  for (const key of PROXY_KEYS) delete env[key];
   env.AWS_ACCESS_KEY_ID = "test";
   env.AWS_SECRET_ACCESS_KEY = "test";
   env.AWS_DEFAULT_REGION = "us-east-1";
@@ -167,299 +149,174 @@ export function scrubbedEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proce
 }
 
 export function flociClientConfig() {
-  return {
-    endpoint: FLOCI_ENDPOINT,
-    region: "us-east-1",
-    credentials: { accessKeyId: "test", secretAccessKey: "test" },
-  };
+  return { endpoint: FLOCI_ENDPOINT, region: "us-east-1", credentials: { accessKeyId: "test", secretAccessKey: "test" } };
 }
 ```
-
-- [ ] **Step 4: Run, confirm PASS. Suite + typecheck + lint. Commit checkpoint.**
-
-```bash
-git add packages/platform/src/cli/floci-env.ts packages/platform/tests/platform/cli-env.test.ts
-```
+- [ ] **Step 4: PASS; suite + typecheck + lint; commit checkpoint** (`git add src/cli/floci-env.ts tests/platform/cli-env.test.ts`).
 
 ---
 
-### Task 2: `url.ts` — pure URL building + `floci-url` command
+### Task 2: `aws.ts` — typed idempotent SDK wrappers
 
-**Files:**
-- Create: `packages/platform/src/cli/url.ts`
-- Create: `packages/platform/tests/platform/cli-url.test.ts`
+**Files:** Create `src/cli/aws.ts`
 
-Separate the PURE URL-construction (given resolved gateway ids + ALB DNS) from the imperative discovery, so the formatting logic is unit-tested.
-
-- [ ] **Step 1: Failing test for pure URL builder**
-
-```ts
-import { describe, expect, test } from "vitest";
-import { buildServiceUrls } from "../../src/cli/url";
-
-test("builds gateway + alb urls for a fronted ecs app", () => {
-  const lines = buildServiceUrls([
-    {
-      serviceName: "docs-app",
-      basePath: "/docs",
-      gatewayId: "abc123",
-      albDns: "dev-venture-core-public-docs-app-xyz.elb.localhost",
-      containerHost: "dev-venture-core-public-docs-app.floci.localhost",
-      containerPort: 3001,
-    },
-  ]);
-  expect(lines.join("\n")).toContain("http://localhost:4566/execute-api/abc123/$default/docs");
-  expect(lines.join("\n")).toContain("http://dev-venture-core-public-docs-app-xyz.elb.localhost/docs");
-});
-
-test("shows Not deployed when gatewayId missing", () => {
-  const lines = buildServiceUrls([
-    { serviceName: "docs-app", basePath: "/docs", gatewayId: undefined, albDns: undefined, containerHost: "h", containerPort: 3001 },
-  ]);
-  expect(lines.join("\n")).toMatch(/not deployed/i);
-});
-```
-
-- [ ] **Step 2: FAIL → implement `buildServiceUrls` (pure)** returning string lines from a typed input array. Base path comes from the fronting gateway's first route path (derive from manifest in the command layer, pass in here). Keep formatting close to `floci-url.sh` output but driven by the manifest list rather than hardcoded blocks.
-
-- [ ] **Step 3: Implement the imperative `runFlociUrl()`** that: loads the manifest, for each apigateway entry resolves its API id (SDK `GetApisCommand`, match `Name === entry.physicalName`, fallback to reading `<stateDir>/terraform.tfstate`), for each fronted ecs entry resolves ALB DNS from its tfstate, derives base paths from gateway routes, then prints `buildServiceUrls(...)`. Add a CLI entry (`if (isCliEntry) runFlociUrl()`), mirroring how `validate.ts`/`generate.ts` detect CLI entry.
-
-- [ ] **Step 4: Run pure tests PASS; suite + typecheck + lint. Commit checkpoint.**
-
-```bash
-git add packages/platform/src/cli/url.ts packages/platform/tests/platform/cli-url.test.ts
-```
+- [ ] **Step 1: Implement** thin wrappers using `flociClientConfig()`. Each swallows not-found errors (`NotFound`/`ResourceNotFoundException`/`NoSuchEntity`/`InvalidGroup.NotFound`) via one shared `isNotFound(err)` predicate. Functions:
+  - `getApiIdByName(name): Promise<string | undefined>` (ApiGatewayV2 `GetApisCommand`)
+  - `deleteApiByName(name)` (find id → `DeleteApiCommand`)
+  - `forceNewEcsDeployment(cluster, service)` (`UpdateServiceCommand { forceNewDeployment: true }`)
+  - `deleteEcsService(cluster, service)` (`UpdateService desiredCount 0` then `DeleteServiceCommand { force: true }`), `deleteEcsCluster(cluster)`
+  - `deleteAlbByName(name)` (describe → delete listeners → delete LB), `deleteTargetGroupsByPrefix(prefix)`
+  - `deleteLambda(name)`, `deleteLogGroup(name)`
+  - `detachRolePolicy(role, policyArn)`, `deleteRolePolicy(role, inlineName)`, `deleteRole(role)`
+  - `deleteSecurityGroupByName(name)` (EC2 describe by `group-name` → `DeleteSecurityGroupCommand`)
+  - `describeEcsService(cluster, service)` (for url/verify)
+  No unit tests (pure IO); exercised in Task 7's live run.
+- [ ] **Step 2: typecheck + lint; commit checkpoint** (`git add src/cli/aws.ts`).
 
 ---
 
-### Task 3: `aws.ts` — typed SDK wrappers
+### Task 3: `reset.ts` — manifest-derived teardown
 
-**Files:**
-- Create: `packages/platform/src/cli/aws.ts`
+**Files:** Create `src/cli/reset.ts`, `tests/platform/cli-reset.test.ts`
 
-Thin, individually-testable-by-integration wrappers used by deploy/reset/url. No unit tests (they're IO); they're exercised in Task 9's live run. Keep each function tiny and single-purpose.
-
-- [ ] **Step 1: Implement wrappers** using `flociClientConfig()`:
-  - `getApiIdByName(name): Promise<string | undefined>` (ApiGatewayV2 `GetApisCommand`, find by `Name`)
-  - `deleteApiByName(name): Promise<void>` (idempotent — ignore not-found)
-  - `forceNewEcsDeployment(cluster, service): Promise<void>` (ECS `UpdateServiceCommand` with `forceNewDeployment: true`)
-  - `deleteEcsService(cluster, service)`, `deleteEcsCluster(cluster)` (idempotent)
-  - `deleteAlbByName(name)` + listeners + `deleteTargetGroupsByPrefix(prefix)` (ELBv2)
-  - `deleteLambda(name)`, `deleteLogGroup(name)`, `deleteRole(name)` + detach/inline-policy (IAM/Lambda/Logs)
-  Each wraps the SDK call in try/catch that swallows `NotFound`/`ResourceNotFoundException`/`NoSuchEntity` (mirroring `run_or_ignore_not_found`). Centralize the "ignore not found" predicate.
-
-- [ ] **Step 2: typecheck + lint. Commit checkpoint** (`git add packages/platform/src/cli/aws.ts`). No behavior to test yet.
-
----
-
-### Task 4: `reset.ts` — `floci-reset` command
-
-**Files:**
-- Create: `packages/platform/src/cli/reset.ts`
-- Create: `packages/platform/tests/platform/cli-reset.test.ts`
-
-- [ ] **Step 1: Unit-test the PURE reset-plan builder**
-
-Extract a pure `planResetTargets(manifest): ResetPlan` that enumerates, from the manifest, exactly which resources to delete (api gateway names, ecs cluster/service names, alb names + target-group prefixes, lambda name + role + log group, generated state dirs). Test it against a fixture manifest asserting it lists docs + payments ECS, all gateways, the payment-api lambda resources — matching the hardcoded lists in `floci-reset-all.sh`.
-
+- [ ] **Step 1: Failing test for the PURE planner** (build a fixture manifest via `buildServiceManifest` over fixture `LoadedService[]`, OR call `loadServiceManifest` against the real tree):
 ```ts
 import { planResetTargets } from "../../src/cli/reset";
-// build a manifest fixture (or call loadServiceManifest in an integration-style test)
-test("plans teardown of every ecs, gateway, and lambda resource", () => {
-  const plan = planResetTargets(/* fixture manifest */);
-  expect(plan.apiGatewayNames).toContain("dev-venture-core-public-docs");
-  expect(plan.ecsClusters).toContain("dev-venture-core-public-payments-app");
-  expect(plan.lambda?.functionName).toBe("dev-venture-core-internal-payment-api");
-});
-```
-Confirm the lambda role/policy/log-group names by reading `src/services/lambda/terraform.ts` and encode the SAME suffixes in `planResetTargets`.
+import { buildServiceManifest } from "../../src/registry";
+// fixtures: payment-api (lambda, permissions.dynamodb), customer-records (dynamodb),
+// docs/payments (apigateway), docs-app/payments-app (ecs; payments-app has permissions.lambda)
 
-- [ ] **Step 2: FAIL → implement `planResetTargets` (pure)** from the manifest.
-
-- [ ] **Step 3: Implement imperative `runFlociReset()`** that: checks Floci reachable (SDK `sts get-caller-identity` equivalent or a cheap call), executes the plan via `aws.ts` wrappers (idempotent), spawns `packages/platform/scripts/floci-ddb-reset.sh` (kept) with scrubbed env, then `rm -rf` the generated floci state dirs (`generatedDirectoryForService(metadata,"floci")` per service). Print progress lines like the script.
-
-- [ ] **Step 4: Pure tests PASS; suite + typecheck + lint. Commit checkpoint.**
-
-```bash
-git add packages/platform/src/cli/reset.ts packages/platform/tests/platform/cli-reset.test.ts
-```
-
----
-
-### Task 5: `deploy.ts` — `floci-deploy` command (bootstrap + build + deploy + restart)
-
-**Files:**
-- Create: `packages/platform/src/cli/deploy.ts`
-- Create: `packages/platform/tests/platform/cli-deploy.test.ts`
-
-This is the core. Generalize the docs/payments deploy scripts into one manifest-driven flow for an app service (and its fronting gateway).
-
-- [ ] **Step 1: Unit-test the PURE deploy-plan/ordering logic**
-
-Extract pure helpers and test them:
-  - `gatewayPathFor(apiId): string` → `/execute-api/${apiId}/$default`
-  - `buildArgsFor(entry, gatewayPath): { APP_NAME, PORT, NEXT_PUBLIC_GATEWAY_PATH }` from `entry.app`/`entry.ecs`
-  - `deployOrderFor(appService, manifest)` → the ordered list of service names to `platform:deploy` (gateway first when bootstrapping, then app+gateway). Mirror the script: bootstrap path deploys `<app>` then `<gateway>`; steady-state deploys `<app>,<gateway>`.
-
-```ts
-import { gatewayPathFor, buildArgsFor } from "../../src/cli/deploy";
-test("gateway path format", () => {
-  expect(gatewayPathFor("abc")).toBe("/execute-api/abc/$default");
-});
-test("docker build args derived from manifest entry", () => {
-  const args = buildArgsFor(
-    { app: { base: "docs" }, ecs: { containerPort: 3001 } } as any, // use a real typed fixture
-    "/execute-api/abc/$default",
+test("derives every teardown target from the manifest", () => {
+  const plan = planResetTargets(buildServiceManifest(fixtures));
+  expect(plan.apiGatewayNames).toEqual(
+    expect.arrayContaining(["dev-venture-core-public-docs", "dev-venture-core-public-payments"]),
   );
-  expect(args).toMatchObject({ APP_NAME: "docs", PORT: 3001, NEXT_PUBLIC_GATEWAY_PATH: "/execute-api/abc/$default" });
+  expect(plan.ecs).toEqual(expect.arrayContaining([
+    expect.objectContaining({ cluster: "dev-venture-core-public-payments-app", targetGroupPrefix: "payme-" }),
+  ]);
+  // lambda resources derived with the emitter suffixes
+  expect(plan.lambdas).toContainEqual(expect.objectContaining({
+    functionName: "dev-venture-core-internal-payment-api",
+    roleName: "dev-venture-core-internal-payment-api-lambda-role",
+    logGroup: "/aws/lambda/dev-venture-core-internal-payment-api",
+    securityGroupName: "dev-venture-core-internal-payment-api-sg",
+    inlineDynamoPolicy: "dev-venture-core-internal-payment-api-dynamodb-access",
+  }));
+  // ECS task role only for ecs services that invoke lambda
+  expect(plan.ecsTaskRoles).toContainEqual(expect.objectContaining({
+    roleName: "dev-venture-core-public-payments-app-task-role",
+    inlinePolicy: "dev-venture-core-public-payments-app-lambda-invoke",
+  }));
+  // network is NOT in any teardown list
+  expect(JSON.stringify(plan)).not.toContain("network");
 });
 ```
-> Replace the `as any` with a properly typed minimal fixture — oxlint forbids unsafe assertions. Construct a real `ServiceManifestEntry` fixture.
+> Before writing the implementation, READ `src/services/lambda/terraform.ts` + `src/services/ecs/terraform.ts` and confirm the exact suffixes: lambda role `physicalName(metadata,"lambda-role")`, log group `/aws/lambda/${physicalName}`, SG `physicalName(metadata,"sg")`, dynamodb inline `physicalName(metadata,"dynamodb-access")`; ECS task role `physicalName(metadata,"task-role")`, invoke inline `physicalName(metadata,"lambda-invoke")`. Mirror them in the planner. (`physicalName(m, suffix)` joins with `-`.)
 
-- [ ] **Step 2: FAIL → implement the pure helpers.**
+- [ ] **Step 2: FAIL → implement `planResetTargets(manifest): ResetPlan`** — pure, iterating manifest entries by `serviceType`, deriving names as above, EXCLUDING `network`. Include `stateDirsToRemove` = `generatedDirectoryForService(metadata, "floci")` for every non-network service.
+- [ ] **Step 3: Implement `runFlociReset()`** — check Floci reachable (a cheap SDK call); execute the plan via `aws.ts` wrappers in safe order (gateways → ECS services → clusters → ALBs/listeners/target-groups → lambda: detach basic-exec + vpc-access, delete inline dynamodb policy, delete role, delete function, delete log group, delete SG → ECS task roles: delete inline, delete role); spawn the kept `packages/platform/scripts/floci-ddb-reset.sh` with `scrubbedEnv()`; `rm -rf` the `stateDirsToRemove`. Print progress lines. Add `if (isCliEntry) runFlociReset()`.
+- [ ] **Step 4: pure test PASS; suite + typecheck + lint; commit checkpoint** (`git add src/cli/reset.ts tests/platform/cli-reset.test.ts`).
 
-- [ ] **Step 3: Implement imperative `runFlociDeploy(serviceName)`**:
-  1. Load manifest; find the app `entry` and its `frontedByGateway`.
-  2. Resolve gateway API id via `getApiIdByName(gateway.physicalName)`. If missing, BOOTSTRAP **without a throwaway full Next build** (see the Optimization goal above): stand up the ECS app/ALB using a placeholder image so the ALB exists — reuse an already-present `<image>:local` if one exists (skip building), else build a minimal placeholder; then `platform:deploy` the app then the gateway; re-resolve the id. The expensive real `next build` happens exactly ONCE, in step 4, after the id is known. Do NOT call `pnpm <app>:build` in this bootstrap branch.
-  3. Resolve ECS env refs: build a `gatewayBaseUrl(serviceName)` resolver from discovered API ids (`${FLOCI_ENDPOINT}/execute-api/<id>/$default`), call `resolveEcsEnv(entry.service.config.env, ...)` (Plan 4) — this is how `PAYMENT_API_BASE_URL` reaches the payments task now.
-  4. The SINGLE real build: host-build the app with `NEXT_PUBLIC_GATEWAY_PATH` set (`pnpm <app>:build`), then `docker build` (shared Dockerfile with `buildArgsFor`). This is the only `next build` in the whole flow.
-  5. `platform:deploy` the app+gateway. (The deploy regenerates Terraform; ensure the resolved ECS env is passed — see Step 4 note.)
+---
+
+### Task 4: `url.ts` — pure URL building + command
+
+**Files:** Create `src/cli/url.ts`, `tests/platform/cli-url.test.ts`
+
+- [ ] **Step 1: Failing test for `buildServiceUrls`** (pure; input = resolved per-app rows):
+```ts
+import { buildServiceUrls } from "../../src/cli/url";
+test("gateway + alb urls for a fronted ecs app", () => {
+  const lines = buildServiceUrls([
+    { serviceName: "docs-app", basePath: "/docs", gatewayId: "abc", albDns: "docs-x.elb.localhost", containerHost: "docs.floci.localhost", containerPort: 3001 },
+  ]).join("\n");
+  expect(lines).toContain("http://localhost:4566/execute-api/abc/$default/docs");
+  expect(lines).toContain("http://docs-x.elb.localhost/docs");
+});
+test("Not deployed when gatewayId missing", () => {
+  expect(buildServiceUrls([{ serviceName: "docs-app", basePath: "/docs", gatewayId: undefined, albDns: undefined, containerHost: "h", containerPort: 3001 }]).join("\n")).toMatch(/not deployed/i);
+});
+```
+- [ ] **Step 2: FAIL → implement `buildServiceUrls` (pure).** Also include a fixed "Payment API: invoked privately via SDK (no gateway)" note line (the payment-api has no URL). Base path = the fronting gateway's first route path, passed in.
+- [ ] **Step 3: Implement `runFlociUrl()`** — load manifest; for each apigateway entry resolve API id via `getApiIdByName` (fallback to tfstate read); for each fronted ecs entry resolve ALB DNS from its floci tfstate; derive base paths from gateway route paths; print `buildServiceUrls(...)`. `if (isCliEntry) runFlociUrl()`.
+- [ ] **Step 4: pure tests PASS; suite + typecheck + lint; commit checkpoint.**
+
+---
+
+### Task 5: `deploy.ts` — manifest-driven deploy (single build, network-first)
+
+**Files:** Create `src/cli/deploy.ts`, `tests/platform/cli-deploy.test.ts`
+
+- [ ] **Step 1: Failing tests for PURE helpers** (construct a real `ServiceManifestEntry` fixture — NO `as any`):
+```ts
+import { gatewayPathFor, dockerBuildArgsFor } from "../../src/cli/deploy";
+test("gateway path", () => { expect(gatewayPathFor("abc")).toBe("/execute-api/abc/$default"); });
+test("docker build args from manifest entry", () => {
+  const entry = /* real ServiceManifestEntry for payments-app with app.base=payments, ecs.containerPort=3002 */;
+  expect(dockerBuildArgsFor(entry)).toEqual({ APP_NAME: "payments", PORT: 3002 });
+});
+```
+- [ ] **Step 2: FAIL → implement pure helpers** (`gatewayPathFor`, `dockerBuildArgsFor`, and `prerequisiteServices(entry, manifest)` returning the in-VPC deps an app needs deployed first — e.g. for payments-app: `network`, `customer-records`, `payment-api` because it invokes the lambda; derive lambda deps from `entry.service.config.permissions?.lambda` + always `network`).
+- [ ] **Step 3: Implement `runFlociDeploy(serviceName)`** for an app service + its fronting gateway:
+  1. Load manifest; find app `entry` + `frontedByGateway`.
+  2. Ensure prerequisites: deploy `network` first; if the app invokes a lambda and that lambda isn't deployed (check via SDK `getFunction` equiv or `lambda_exists`), `platform:deploy network,<dynamo deps>,<lambda>` (package the lambda first via `pnpm app:<lambda>:package` if a packaging script exists). NO `payment-api-ingress`.
+  3. Resolve the app's own gateway id via `getApiIdByName(frontedByGateway.physicalName)`. If missing → bootstrap the ECS app/ALB with a placeholder/cached image (NO full `next build`), `platform:deploy <app>` then `<gateway>`, re-resolve id.
+  4. The SINGLE real build: `pnpm <app>:build` with `NEXT_PUBLIC_GATEWAY_PATH=gatewayPathFor(id)` set in the spawned env; `docker build -f apps/Dockerfile` with `dockerBuildArgsFor(entry)`.
+  5. `platform:deploy <app>,<gateway>` (spawn `pnpm platform:deploy -- --env dev --venture venture --target floci --services ...` with `scrubbedEnv()`).
   6. `forceNewEcsDeployment(entry.ecs.clusterName, entry.ecs.clusterName)`.
-  7. Print URLs (call `runFlociUrl()` or its core).
-
-  > Build-count assertion for Task 9's live run: a cold `floci:deploy:all` must perform at most ONE `next build` per app (down from two). Verify by counting build invocations in the CLI's logged output. On AWS (no gateway path) the bootstrap branch is skipped entirely.
-
-- [ ] **Step 4: Resolve the ECS-env-at-deploy wiring**
-
-`platform:deploy` (`src/deploy.ts`) shells to `platform:generate`. For `ref` env to land in the task def, generation during deploy must receive the resolved env. Simplest approach that fits the existing structure: have `floci-deploy` set the resolved values as process env and extend `generate.ts` (Plan 4 made it static-only) to also pick up deploy-injected ref values — OR have `floci-deploy` call generation directly with `resolvedEcsEnv` in the `TerraformContext` rather than going through the shell `platform:deploy`. Choose the direct path: `floci-deploy` imports `terraformForService` + `buildServiceManifest`, generates with `resolvedEcsEnv` per ecs service, writes the files, then runs `terraform init/plan/apply` per service (reuse the logic in `src/deploy.ts`). Refactor `src/deploy.ts`'s apply loop into an importable function if needed. Document the chosen approach in the report.
-
-> This is the one genuinely tricky integration. If it proves too large, split: land deploy WITHOUT ref-env first (static env only), file a follow-up task for ref-env injection. Report if you split.
-
-- [ ] **Step 5: Pure tests PASS; suite + typecheck + lint. Commit checkpoint.**
-
-```bash
-git add packages/platform/src/cli/deploy.ts packages/platform/tests/platform/cli-deploy.test.ts
-```
+  7. Print URLs via the url core.
+  > Build-count: cold deploy does at most ONE `next build` per app. No `NEXT_PUBLIC_PAYMENT_API_BASE_URL` (gone). The payments task gets `PAYMENT_API_FUNCTION_NAME` + Floci AWS env from the ECS emitter automatically — the CLI does nothing special for it.
+- [ ] **Step 4: pure tests PASS; suite + typecheck + lint; commit checkpoint.**
 
 ---
 
-### Task 6: `dev.ts` — `floci-dev` command
+### Task 6: `dev.ts` — `floci-dev`
 
-**Files:**
-- Create: `packages/platform/src/cli/dev.ts`
+**Files:** Create `src/cli/dev.ts`
 
-- [ ] **Step 1: Implement `runFlociDev(serviceName)`**: load manifest, find app entry + fronting gateway, resolve gateway id, spawn `pnpm --filter <packageName> dev` with `NEXT_PUBLIC_GATEWAY_PATH` set and scrubbed env. Mirror `docs-dev-floci.sh` (including the `lsof`/lock cleanup only if trivial; otherwise omit — it's a dev convenience). Generalizes beyond docs to any app.
-
-- [ ] **Step 2: typecheck + lint. Commit checkpoint** (`git add packages/platform/src/cli/dev.ts`).
+- [ ] **Step 1: Implement `runFlociDev(serviceName)`** — load manifest, find app entry + fronting gateway, resolve gateway id, spawn `pnpm --filter <app.packageName> dev` with `NEXT_PUBLIC_GATEWAY_PATH` + `scrubbedEnv()`. Generalizes `docs-dev-floci.sh` to any app. Omit the `lsof` lock cleanup unless trivial.
+- [ ] **Step 2: typecheck + lint; commit checkpoint.**
 
 ---
 
-### Task 7: Wire CLI entries in package.json; delete shell scripts
+### Task 7: Wire package.json; delete shell scripts; live verify
 
-**Files:**
-- Modify: `packages/platform/package.json` (script entries calling the CLI)
-- Modify: root `package.json` (generic entries)
-- Delete: the five shell scripts
+**Files:** Modify `packages/platform/package.json`, root `package.json`; delete 4 shell scripts.
 
-- [ ] **Step 1: Add platform script entries** in `packages/platform/package.json`:
-```json
-"floci:deploy:service": "tsx --no-cache src/cli/deploy.ts",
-"floci:url": "tsx --no-cache src/cli/url.ts",
-"floci:reset:all": "tsx --no-cache src/cli/reset.ts",
-"floci:dev": "tsx --no-cache src/cli/dev.ts"
-```
-(Replace the existing `floci:reset:all` shell entry.)
-
-- [ ] **Step 2: Update root package.json** — replace per-service entries:
+- [ ] **Step 1: Platform script entries** (`packages/platform/package.json`): replace the shell `floci:reset:all` with `"floci:reset:all": "tsx --no-cache src/cli/reset.ts"`; add `"floci:url": "tsx --no-cache src/cli/url.ts"`, `"floci:deploy:service": "tsx --no-cache src/cli/deploy.ts"`, `"floci:dev": "tsx --no-cache src/cli/dev.ts"`.
+- [ ] **Step 2: Root `package.json`:**
   - `floci:url` → `pnpm --filter @repo/platform run floci:url`
   - `floci:deploy:docs` → `pnpm --filter @repo/platform run floci:deploy:service -- docs-app`
   - `floci:deploy:payments` → `pnpm --filter @repo/platform run floci:deploy:service -- payments-app`
   - `docs:dev:floci` → `pnpm --filter @repo/platform run floci:dev -- docs-app`
-  - `floci:deploy:all` stays as `pnpm floci:deploy:payments && pnpm floci:deploy:docs`
-  - `floci:reset:all` already delegates to the platform script (now TS).
-  Keep `docs:build`, `payments:build`, `*:docker:build` for now (the CLI calls docker directly, but these are still handy; the spec's "collapse per-service entries" is satisfied by removing the deploy/url/dev shell indirection). Remove entries that pointed at deleted scripts.
-
-- [ ] **Step 3: Delete the five shell scripts**
+  - `floci:deploy:all`, `floci:redeploy:all`, `floci:reset:all` (delegates to platform) stay.
+  - Keep `docs:build`/`payments:build`/`*:docker:build` (the CLI may shell to them).
+- [ ] **Step 3: Delete the 4 orchestration scripts** (reset script is replaced via the platform entry change in Step 1):
 ```bash
 git rm scripts/floci-deploy-docs.sh scripts/floci-deploy-payments.sh scripts/floci-url.sh scripts/docs-dev-floci.sh packages/platform/scripts/floci-reset-all.sh
 ```
-
-- [ ] **Step 4: Grep for dangling references** to the deleted scripts:
+- [ ] **Step 4: Grep for dangling refs:**
 ```bash
-grep -rn "floci-deploy-docs\|floci-deploy-payments\|floci-url.sh\|docs-dev-floci\|floci-reset-all" --include="*.json" --include="*.sh" --include="*.md" . | grep -v docs/superpowers
+grep -rn "floci-deploy-docs\|floci-deploy-payments\|floci-url.sh\|docs-dev-floci\|floci-reset-all" --include="*.json" --include="*.sh" . | grep -v docs/superpowers
 ```
-Fix any (e.g. `floci-reset-all.sh` is referenced inside other kept scripts? It isn't — verify). The `floci-ddb-reset.sh` spawn from `reset.ts` must point at the kept script path.
-
-- [ ] **Step 5: typecheck + lint. Commit checkpoint.**
-
+Fix any. Confirm `reset.ts` spawns the KEPT `packages/platform/scripts/floci-ddb-reset.sh`.
+- [ ] **Step 5: Live verify** (Floci up + Docker):
 ```bash
-git add package.json packages/platform/package.json && git rm --cached scripts/floci-deploy-docs.sh scripts/floci-deploy-payments.sh scripts/floci-url.sh scripts/docs-dev-floci.sh packages/platform/scripts/floci-reset-all.sh
+pnpm floci:redeploy:all        # now fully TS-driven reset + deploy
 ```
-Report the diff.
-
----
-
-### Task 8: Add the `env` block to `payments-app.ecs.yaml`
-
-**Files:**
-- Modify: `infra/services/dev/venture/core/public/payments-app.ecs.yaml`
-
-Now that the runtime var (Plan 3) + schema/resolver (Plan 4) + deploy resolution (Task 5) exist, declare the cross-service env so the payments container gets the payment-api gateway URL at runtime.
-
-- [ ] **Step 1: Add to `payments-app.ecs.yaml`**
-
-```yaml
-env:
-  PAYMENT_API_BASE_URL:
-    ref:
-      gatewayBaseUrl: payment-api-ingress
-```
-(Confirm `payment-api-ingress` is the apigateway service name fronting the payment-api lambda — verified in the YAMLs.)
-
-- [ ] **Step 2: Validate** — `pnpm platform:validate dev venture` passes (schema accepts env from Plan 4).
-
-- [ ] **Step 3: Byte-identical check is now EXPECTED TO CHANGE for payments-app only**
-
-```bash
-pnpm platform:generate -- --env dev --venture venture --target floci
-git status --short infra/services | grep main.tf.json
-```
-Expected: ONLY `payments-app/main.tf.json` (floci, and aws if generated) shows modified — now containing an `environment` entry. All other services unchanged. This is the intended first real use of the env feature. Inspect the diff to confirm it's just the `environment` addition (the `ref` resolves at deploy; at generate time without an id it'll be static-only/empty — so actually generate-time output may still omit it; confirm behavior matches Plan 4 Task 5's static-only generate decision, meaning the env only materializes during `floci:deploy`). Document what you observe.
-
-- [ ] **Step 4: Commit checkpoint** (`git add infra/services/.../payments-app.ecs.yaml` and any regenerated tf). Report.
-
----
-
-### Task 9: Live end-to-end verification
-
-- [ ] **Step 1: Preconditions** — Floci up (`curl -i http://localhost:4566`), Docker running.
-
-- [ ] **Step 2: Full reset + redeploy via the NEW CLI**
-```bash
-pnpm floci:reset:all
-pnpm floci:deploy:all
-```
-Expected: completes; URLs printed.
-
-- [ ] **Step 3: Verify all three flows return 200** (docs, payments, payment-api) and the payments app receives `PAYMENT_API_BASE_URL` (the page shows configured state / a payment POST through the UI path succeeds). Use the same checks as `docs/verify-redeploy-after-plugin-refactor.md` (ECS describe-services, API gateway curl, DynamoDB get-item).
-
-- [ ] **Step 4: Verify `pnpm floci:url` and `pnpm floci:dev -- docs-app`** behave like the old scripts.
-
-- [ ] **Step 5: Write `docs/verify-cli-replaces-shell.md`** in the same format as the existing verify doc, recording the commands and results.
-
-- [ ] **Step 6: Full green check** — repo root `pnpm lint && pnpm typecheck && pnpm --filter @repo/platform test`.
-
-- [ ] **Step 7: Commit checkpoint** — `git add -A` the CLI, package.json, deleted scripts, verify doc; report final summary.
+Then confirm: docs 200, payments 200, and a payment POST (`/payments/api/payments`) persists to DynamoDB (the Spec C acceptance flow). Also `pnpm floci:url` prints sane URLs and `pnpm floci:dev -- docs-app` starts. **Critically: the reset must succeed without the Spec-C-resource bug** — `planResetTargets` derives the lambda SG + ECS task role from the manifest, so they're torn down automatically.
+- [ ] **Step 6: Write `docs/verify-cli-replaces-shell.md`** recording commands + results.
+- [ ] **Step 7: Full green** — repo root `pnpm lint && pnpm --filter @repo/platform typecheck && pnpm --filter @repo/platform test`. Commit checkpoint (`git add -A` the cli, package.json, deleted scripts, verify doc).
 
 ---
 
 ## Self-Review Notes
 
-- **Spec coverage:** Implements spec §5 (TS CLI replacing all five orchestration shell scripts, AWS SDK, manifest-driven, package.json collapsed) and closes the loop on §3/§4 by adding the payments `env` block (Task 8) so the runtime `PAYMENT_API_BASE_URL` is actually supplied.
-- **Dependency on Plans 2–4:** Task 0 gates it.
-- **Risk management:** pure logic (env scrub, URL building, reset planning, deploy build-args/ordering) is unit-tested; imperative AWS/docker/terraform orchestration is validated by the live run (Task 9). The genuinely hard integration (ref-env at deploy time) is isolated in Task 5 Step 4 with an explicit fallback-split instruction if it's too large.
-- **Kept scripts:** the DDB helpers + `floci-invoke-payment-api.sh` + `floci-env.sh` stay; `reset.ts` spawns the kept `floci-ddb-reset.sh`.
-- **Byte-identical nuance:** Terraform output stays identical until Task 8 deliberately opts payments-app into `env`; that one change is inspected.
-- **Open decision:** Task 0 Step 2 asks the user to confirm AWS SDK deps vs spawning `aws` CLI — the one thing needing a human call before building.
-- **No placeholders** except clearly-marked typed-fixture spots where the implementer must construct a real `ServiceManifestEntry` (oxlint forbids the `as any` shown for illustration).
-```
+- **Coverage:** spec §5 (TS CLI replaces the 4 orchestration scripts + the reset script; AWS SDK; manifest-driven; package.json collapsed). The obsolete Plan-4 `env`/`ref` Task (old Task 8) is REMOVED. The old Task 0 Plan-4 pre-reqs are REMOVED.
+- **The bug this prevents:** `planResetTargets` derives teardown targets from service configs (lambda SG, ECS task role, vpc-access detach all fall out of reading the manifest), so the 2026-06-22 reset failure class cannot recur when a new resource type is added — you teach the planner once.
+- **Network preserved:** reset never tears down the `network` module (no VPC/subnet/SG/endpoint deletes, no network state-dir removal) — matches current behavior and keeps redeploy idempotent.
+- **Floci endpoint nuance:** CLI runs host-side → `http://localhost:4566`. (Container-side `host.docker.internal` is only for ECS task env, already handled by the ECS emitter.)
+- **Single-build optimization** retained (Task 5 step 3).
+- **No placeholders:** the one fixture spot in Task 5 explicitly requires a real typed `ServiceManifestEntry` (no `as any`).
+- **Deps:** AWS SDK v3 (user-confirmed), incl. `@aws-sdk/client-ec2` for SG-by-name teardown.
+- **Type consistency:** `planResetTargets`/`ResetPlan`, `buildServiceUrls`, `gatewayPathFor`/`dockerBuildArgsFor`/`prerequisiteServices`, `runFloci{Reset,Url,Deploy,Dev}`, `scrubbedEnv`/`flociClientConfig` used consistently.

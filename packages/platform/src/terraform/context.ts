@@ -11,6 +11,12 @@ export type TerraformContext = {
   domainCertificateArns?: Record<string, string>;
   /** AWS services that in-VPC code must reach privately; the network module turns these into VPC endpoints. */
   requiredAwsEndpoints?: AwsEndpointService[];
+  /**
+   * Per-service ECS image tag override (serviceName -> tag). Set at deploy time
+   * to a content hash so the task definition changes only when the image
+   * changes. Absent → the ECS service uses its static `image.tag`.
+   */
+  imageTagOverride?: Record<string, string>;
 };
 
 export type TerraformContextWithServiceContainerPorts = TerraformContext & {

@@ -27,6 +27,15 @@ function functionNameEnvKey(serviceName: string): string {
   return `${serviceName.toUpperCase().replace(/-/g, "_")}_FUNCTION_NAME`;
 }
 
+// The container image ref. The tag defaults to the static `image.tag` from the
+// ECS YAML, but the deploy CLI can override it per service with a content hash
+// (via context.imageTagOverride) so the task definition changes only when the
+// image content changes.
+function containerImageRef(service: EcsService, options: TerraformContext): string {
+  const tag = options.imageTagOverride?.[service.metadata.serviceName] ?? service.config.image.tag;
+  return `${service.config.image.repository}:${tag}`;
+}
+
 // Container environment for an ECS task: the target Lambda function names (so the
 // app's SDK knows what to invoke) plus, on the Floci target, the local AWS
 // endpoint + test credentials so the in-container AWS SDK reaches Floci (mirrors
@@ -210,7 +219,7 @@ function awsEc2EcsResources(
           container_definitions: JSON.stringify([
             {
               name: resourceName,
-              image: `${service.config.image.repository}:${service.config.image.tag}`,
+              image: containerImageRef(service, options),
               essential: true,
               portMappings: [
                 {
@@ -464,7 +473,7 @@ function flociEcsResources(
           container_definitions: JSON.stringify([
             {
               name: resourceName,
-              image: `${service.config.image.repository}:${service.config.image.tag}`,
+              image: containerImageRef(service, options),
               essential: true,
               portMappings: [
                 {
@@ -642,7 +651,7 @@ function awsFargateEcsResources(
           container_definitions: JSON.stringify([
             {
               name: resourceName,
-              image: `${service.config.image.repository}:${service.config.image.tag}`,
+              image: containerImageRef(service, options),
               essential: true,
               portMappings: [
                 {

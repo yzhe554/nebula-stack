@@ -1,5 +1,16 @@
 # ECS Env Vars in YAML Implementation Plan
 
+> **STATUS: OBSOLETE / NOT IMPLEMENTED (2026-06-22).**
+> This plan's sole motivating consumer was injecting `PAYMENT_API_BASE_URL` into
+> the payments app via an ECS `env` block with `ref: gatewayBaseUrl`. **Spec C
+> eliminated that need**: the payments app now reaches the payment-api Lambda via
+> AWS SDK `InvokeCommand` (using `PAYMENT_API_FUNCTION_NAME`, injected by
+> `ecs.permissions.lambda`), not an HTTP gateway URL. The ECS emitter already
+> emits a container `environment` array (added for `permissions.lambda` in Spec
+> C), so the generic `env`/`ref` machinery here has no current user. Building it
+> now would be speculative (YAGNI). Revisit only if a real need for arbitrary
+> static/ref ECS env vars emerges. See `docs/superpowers/specs/2026-06-22-in-vpc-lambda-direct-invoke-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let an ECS service declare runtime environment variables in its YAML — both static literals and references to another service's deployed gateway base URL — validated by the zod schema and emitted into the ECS task definition's container `environment`, with `ref` values resolved at deploy time from the service manifest.

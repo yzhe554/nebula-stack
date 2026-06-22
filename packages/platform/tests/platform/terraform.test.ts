@@ -248,6 +248,62 @@ describe("terraformForService", () => {
     expect(flociTerraform.resource.aws_appautoscaling_policy).toBeUndefined();
   });
 
+  test("ECS container image uses imageTagOverride when present, else the static tag", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/docs-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "fargate" },
+        service: { desiredCount: 1, containerPort: 3001 },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "nebula-docs", tag: "local" },
+        healthCheck: { path: "/docs" },
+      },
+    };
+
+    const imageOf = (terraform: TerraformResult): string => {
+      const taskDef = resource(terraform, "aws_ecs_task_definition", "docs_app");
+      const containers = JSON.parse(stringProperty(taskDef, "container_definitions"));
+      return containers[0].image;
+    };
+
+    // No override → static tag.
+    expect(imageOf(terraformResult(terraformForService(service, { target: "aws" })))).toBe(
+      "nebula-docs:local",
+    );
+
+    // Override for this service → hashed tag.
+    expect(
+      imageOf(
+        terraformResult(
+          terraformForService(service, {
+            target: "aws",
+            imageTagOverride: { "docs-app": "abc123def456" },
+          }),
+        ),
+      ),
+    ).toBe("nebula-docs:abc123def456");
+
+    // Override map present but missing this service → static tag.
+    expect(
+      imageOf(
+        terraformResult(
+          terraformForService(service, {
+            target: "aws",
+            imageTagOverride: { "payments-app": "zzz" },
+          }),
+        ),
+      ),
+    ).toBe("nebula-docs:local");
+  });
+
   test("generates ECS EC2 capacity resources when requested", () => {
     const service: LoadedService = {
       metadata: {

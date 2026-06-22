@@ -8,6 +8,7 @@ import {
   serviceNamesFromManifest,
 } from "./registry";
 import { deriveRequiredAwsEndpoints } from "./services/network/endpoints";
+import { parseImageTagOverrides } from "./image-tag-args";
 import { terraformForService, type DeployTarget } from "./terraform";
 import { validateServiceReferences } from "./validate";
 
@@ -35,6 +36,7 @@ const manifest = buildServiceManifest(scopedServices);
 const serviceNames = serviceNamesFromManifest(manifest);
 const serviceContainerPorts = serviceContainerPortsFromManifest(manifest);
 const requiredAwsEndpoints = deriveRequiredAwsEndpoints(scopedServices);
+const imageTagOverride = parseImageTagOverrides(args.imageTags);
 const target = args.target ?? "aws";
 
 for (const service of services) {
@@ -42,7 +44,7 @@ for (const service of services) {
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(
     path.join(outputDirectory, "main.tf.json"),
-    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames, serviceContainerPorts, requiredAwsEndpoints }), null, 2)}\n`,
+    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames, serviceContainerPorts, requiredAwsEndpoints, imageTagOverride }), null, 2)}\n`,
     "utf8",
   );
   console.log(
@@ -55,8 +57,15 @@ function parseArgs(argv: string[]): {
   venture?: string;
   target?: DeployTarget;
   services?: string[];
+  imageTags: string[];
 } {
-  const parsed: { env?: string; venture?: string; target?: DeployTarget; services?: string[] } = {};
+  const parsed: {
+    env?: string;
+    venture?: string;
+    target?: DeployTarget;
+    services?: string[];
+    imageTags: string[];
+  } = { imageTags: [] };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -88,6 +97,12 @@ function parseArgs(argv: string[]): {
         .split(",")
         .map((service) => service.trim())
         .filter(Boolean);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--image-tag") {
+      parsed.imageTags.push(argv[index + 1]);
       index += 1;
       continue;
     }
