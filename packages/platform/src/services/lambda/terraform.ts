@@ -7,6 +7,7 @@ import {
   type TerraformJson,
 } from "../../terraform/base";
 import { physicalName, terraformName } from "../../terraform/naming";
+import { vpcDataSourcesForZone } from "../../terraform/vpc-lookup";
 import type { TerraformContext } from "../../terraform/context";
 import type { LoadedService } from "../../types";
 
@@ -20,59 +21,92 @@ export function terraformForLambda(
   const roleName = `${resourceName}_lambda_role`;
   const logGroupName = `/aws/lambda/${physicalName(service.metadata)}`;
   const packagePath = lambdaPackagePath(service, options);
+  const zone = service.config.zone ?? "internal";
+  const vpcData = vpcDataSourcesForZone(service.metadata, zone);
 
-  return baseTerraform(service.metadata, options.target ?? "aws", {
-    aws_iam_role: {
-      [roleName]: {
-        name: physicalName(service.metadata, "lambda-role"),
-        assume_role_policy: JSON.stringify({
-          Version: "2012-10-17",
-          Statement: [
-            {
-              Action: "sts:AssumeRole",
-              Effect: "Allow",
-              Principal: { Service: "lambda.amazonaws.com" },
-            },
-          ],
-        }),
-        tags: tagsFor(service.metadata),
-      },
-    },
-    aws_iam_role_policy_attachment: {
-      [`${roleName}_basic_execution`]: {
-        role: `\${aws_iam_role.${roleName}.name}`,
-        policy_arn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-      },
-    },
-    ...lambdaDynamoDbPolicies(service, resourceName, roleName, options),
-    aws_cloudwatch_log_group: {
-      [resourceName]: {
-        name: logGroupName,
-        retention_in_days: service.config.logRetentionDays,
-        tags: tagsFor(service.metadata),
-      },
-    },
-    aws_lambda_function: {
-      [resourceName]: {
-        function_name: physicalName(service.metadata),
-        filename: packagePath,
-        source_code_hash: `\${filebase64sha256("${packagePath}")}`,
-        role: `\${aws_iam_role.${roleName}.arn}`,
-        handler: service.config.handler,
-        runtime: service.config.runtime,
-        memory_size: service.config.memoryMb,
-        timeout: service.config.timeoutSeconds,
-        environment: {
-          variables: lambdaEnvironmentVariables(service, options),
+  return baseTerraform(
+    service.metadata,
+    options.target ?? "aws",
+    {
+      aws_iam_role: {
+        [roleName]: {
+          name: physicalName(service.metadata, "lambda-role"),
+          assume_role_policy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Action: "sts:AssumeRole",
+                Effect: "Allow",
+                Principal: { Service: "lambda.amazonaws.com" },
+              },
+            ],
+          }),
+          tags: tagsFor(service.metadata),
         },
-        depends_on: [
-          `aws_iam_role_policy_attachment.${roleName}_basic_execution`,
-          `aws_cloudwatch_log_group.${resourceName}`,
-        ],
-        tags: tagsFor(service.metadata),
+      },
+      aws_iam_role_policy_attachment: {
+        [`${roleName}_basic_execution`]: {
+          role: `\${aws_iam_role.${roleName}.name}`,
+          policy_arn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        },
+        [`${resourceName}_vpc_access`]: {
+          role: `\${aws_iam_role.${roleName}.name}`,
+          policy_arn: "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+        },
+      },
+      ...lambdaDynamoDbPolicies(service, resourceName, roleName, options),
+      aws_security_group: {
+        [resourceName]: {
+          name: physicalName(service.metadata, "sg"),
+          vpc_id: "${data.aws_vpc.selected.id}",
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_security_group_rule: {
+        [`${resourceName}_egress`]: {
+          type: "egress",
+          from_port: 0,
+          to_port: 0,
+          protocol: "-1",
+          cidr_blocks: ["0.0.0.0/0"],
+          security_group_id: `\${aws_security_group.${resourceName}.id}`,
+        },
+      },
+      aws_cloudwatch_log_group: {
+        [resourceName]: {
+          name: logGroupName,
+          retention_in_days: service.config.logRetentionDays,
+          tags: tagsFor(service.metadata),
+        },
+      },
+      aws_lambda_function: {
+        [resourceName]: {
+          function_name: physicalName(service.metadata),
+          filename: packagePath,
+          source_code_hash: `\${filebase64sha256("${packagePath}")}`,
+          role: `\${aws_iam_role.${roleName}.arn}`,
+          handler: service.config.handler,
+          runtime: service.config.runtime,
+          memory_size: service.config.memoryMb,
+          timeout: service.config.timeoutSeconds,
+          environment: {
+            variables: lambdaEnvironmentVariables(service, options),
+          },
+          vpc_config: {
+            subnet_ids: "${data.aws_subnets.selected.ids}",
+            security_group_ids: [`\${aws_security_group.${resourceName}.id}`],
+          },
+          depends_on: [
+            `aws_iam_role_policy_attachment.${roleName}_basic_execution`,
+            `aws_iam_role_policy_attachment.${resourceName}_vpc_access`,
+            `aws_cloudwatch_log_group.${resourceName}`,
+          ],
+          tags: tagsFor(service.metadata),
+        },
       },
     },
-  });
+    vpcData,
+  );
 }
 
 function lambdaPackagePath(service: LambdaService, options: TerraformContext): string {

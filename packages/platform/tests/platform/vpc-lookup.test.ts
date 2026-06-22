@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { vpcDataSources, vpcNameTag } from "../../src/terraform/vpc-lookup";
+import { vpcDataSources, vpcDataSourcesForZone, vpcNameTag } from "../../src/terraform/vpc-lookup";
 import type { ServiceMetadata } from "../../src/types";
 
 const metadata: ServiceMetadata = {
@@ -27,6 +27,19 @@ describe("vpcDataSources", () => {
         filter: [
           { name: "vpc-id", values: ["${data.aws_vpc.selected.id}"] },
           { name: "tag:Zone", values: ["public"] },
+        ],
+      },
+    });
+  });
+
+  test("vpcDataSourcesForZone filters subnets by the given zone, not metadata.securityZone", () => {
+    // metadata.securityZone is "public"; override to "internal".
+    const data = vpcDataSourcesForZone(metadata, "internal");
+    expect(data.aws_subnets).toEqual({
+      selected: {
+        filter: [
+          { name: "vpc-id", values: ["${data.aws_vpc.selected.id}"] },
+          { name: "tag:Zone", values: ["internal"] },
         ],
       },
     });

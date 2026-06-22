@@ -1,5 +1,6 @@
 // packages/platform/src/terraform/context.ts
 import type { DeployTarget } from "./base";
+import type { AwsEndpointService } from "../services/network/endpoints";
 
 export type TerraformContext = {
   target?: DeployTarget;
@@ -8,6 +9,8 @@ export type TerraformContext = {
   /** Required for Floci API Gateway routes that target ECS services. */
   serviceContainerPorts?: Record<string, number>;
   domainCertificateArns?: Record<string, string>;
+  /** AWS services that in-VPC code must reach privately; the network module turns these into VPC endpoints. */
+  requiredAwsEndpoints?: AwsEndpointService[];
 };
 
 export type TerraformContextWithServiceContainerPorts = TerraformContext & {

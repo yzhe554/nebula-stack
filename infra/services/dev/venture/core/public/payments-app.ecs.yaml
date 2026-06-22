@@ -17,3 +17,8 @@ image:
   tag: local
 healthCheck:
   path: /payments
+permissions:
+  lambda:
+    - service: payment-api
+      actions:
+        - lambda:InvokeFunction

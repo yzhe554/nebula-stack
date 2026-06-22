@@ -293,3 +293,52 @@ describe("terraformForNetwork – flow logs", () => {
     expect(resource(flociTf, "aws_vpc", "network")["cidr_block"]).toBe("10.20.0.0/16");
   });
 });
+
+describe("terraformForNetwork – vpc endpoints", () => {
+  test("emits a dynamodb gateway endpoint on aws when required", () => {
+    const tf = terraformResult(
+      terraformForNetwork(svc, { target: "aws", requiredAwsEndpoints: ["dynamodb"] }),
+    );
+    const ep = resource(tf, "aws_vpc_endpoint", "dynamodb");
+    expect(ep["vpc_endpoint_type"]).toBe("Gateway");
+    expect(ep["service_name"]).toBe("com.amazonaws.ap-southeast-2.dynamodb");
+    expect(ep["route_table_ids"]).toEqual(["${aws_route_table.internal.id}"]);
+  });
+
+  test("emits an interface endpoint + endpoints SG + subnet data source for lambda on aws", () => {
+    const tf = terraformResult(
+      terraformForNetwork(svc, { target: "aws", requiredAwsEndpoints: ["lambda"] }),
+    );
+    const ep = resource(tf, "aws_vpc_endpoint", "lambda");
+    expect(ep["vpc_endpoint_type"]).toBe("Interface");
+    expect(ep["private_dns_enabled"]).toBe(true);
+    // The endpoints SG is merged alongside the zone SGs.
+    expect(resource(tf, "aws_security_group", "endpoints")["name"]).toBe(
+      "dev-venture-core-endpoints-sg",
+    );
+    expect(resource(tf, "aws_security_group_rule", "endpoints_ingress_443")["from_port"]).toBe(443);
+    // The subnet lookup is merged into the module data block.
+    expect(data(tf, "aws_subnets", "internal_endpoints")).toEqual({
+      filter: [
+        { name: "vpc-id", values: ["${aws_vpc.network.id}"] },
+        { name: "tag:Zone", values: ["internal"] },
+      ],
+    });
+  });
+
+  test("emits NO endpoints when none required", () => {
+    const tf = terraformResult(
+      terraformForNetwork(svc, { target: "aws", requiredAwsEndpoints: [] }),
+    );
+    expect(tf.resource["aws_vpc_endpoint"]).toBeUndefined();
+  });
+
+  test("omits endpoints entirely on the floci target even when required", () => {
+    const tf = terraformResult(
+      terraformForNetwork(svc, { target: "floci", requiredAwsEndpoints: ["dynamodb", "lambda"] }),
+    );
+    expect(tf.resource["aws_vpc_endpoint"]).toBeUndefined();
+    // Zone SGs still exist on floci, but the endpoints SG is not added.
+    expect(objectProperty(tf.resource, "aws_security_group")["endpoints"]).toBeUndefined();
+  });
+});

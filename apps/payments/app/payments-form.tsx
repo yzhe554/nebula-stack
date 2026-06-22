@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 
 type SubmitState =
   | { status: "idle" }
@@ -8,31 +8,17 @@ type SubmitState =
   | { status: "success"; response: unknown }
   | { status: "error"; message: string };
 
-const defaultPaymentApiBaseUrl = "http://localhost:4566/execute-api/<payment-api-id>/$default";
-
-export function PaymentsForm({ paymentApiBaseUrl: rawBaseUrl }: { paymentApiBaseUrl: string }) {
+export function PaymentsForm() {
   const [customerId, setCustomerId] = useState("customer-local-1");
   const [message, setMessage] = useState("created from payments app");
   const [state, setState] = useState<SubmitState>({ status: "idle" });
 
-  const paymentApiBaseUrl = useMemo(() => trimTrailingSlash(rawBaseUrl ?? ""), [rawBaseUrl]);
-  const isConfigured = paymentApiBaseUrl.length > 0;
-
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!isConfigured) {
-      setState({
-        status: "error",
-        message: "Set PAYMENT_API_BASE_URL before submitting payments.",
-      });
-      return;
-    }
-
     setState({ status: "loading" });
 
     try {
-      const response = await fetch(`${paymentApiBaseUrl}/api/payments`, {
+      const response = await fetch("/api/payments", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ customerId, message }),
@@ -80,12 +66,6 @@ export function PaymentsForm({ paymentApiBaseUrl: rawBaseUrl }: { paymentApiBase
 
         <div className="result" aria-live="polite">
           <h2>Result</h2>
-          {!isConfigured ? (
-            <p className="warning">
-              Configure <code>PAYMENT_API_BASE_URL</code>. For Floci this looks like{" "}
-              <code>{defaultPaymentApiBaseUrl}</code>.
-            </p>
-          ) : null}
           {state.status === "idle" ? <p>Submit the form to see the Lambda response.</p> : null}
           {state.status === "loading" ? <p>Calling payment API...</p> : null}
           {state.status === "error" ? <p className="error">{state.message}</p> : null}
@@ -98,8 +78,4 @@ export function PaymentsForm({ paymentApiBaseUrl: rawBaseUrl }: { paymentApiBase
       </section>
     </main>
   );
-}
-
-function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, "");
 }

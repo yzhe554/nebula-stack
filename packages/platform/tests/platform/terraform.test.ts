@@ -823,6 +823,239 @@ describe("terraformForService", () => {
     expect(Object.keys(dynamo.resource)).toContain("aws_dynamodb_table");
   });
 
+  test("lambda runs in the VPC: vpc_config with the zone subnets + lambda SG + VPC-access policy", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "internal",
+        serviceName: "payment-api",
+        serviceType: "lambda",
+        sourcePath: "infra/services/dev/venture/core/internal/payment-api.lambda.yaml",
+      },
+      config: {
+        runtime: "nodejs22.x",
+        handler: "index.handler",
+        package: "../x.zip",
+        memoryMb: 128,
+        timeoutSeconds: 10,
+        logRetentionDays: 7,
+        environment: {},
+        zone: "internal",
+        permissions: { dynamodb: [{ service: "customer-records", actions: ["dynamodb:PutItem"] }] },
+      },
+    };
+    const tf = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: { "customer-records": "dev-venture-core-managed-customer-records" },
+      }),
+    );
+    // vpc_config on the function
+    const fn = resource(tf, "aws_lambda_function", "payment_api");
+    expect(objectProperty(fn, "vpc_config")).toEqual({
+      subnet_ids: "${data.aws_subnets.selected.ids}",
+      security_group_ids: ["${aws_security_group.payment_api.id}"],
+    });
+    // lambda SG in the looked-up VPC
+    expect(resource(tf, "aws_security_group", "payment_api")["vpc_id"]).toBe(
+      "${data.aws_vpc.selected.id}",
+    );
+    // separate egress rule (NOT inline)
+    expect(resource(tf, "aws_security_group_rule", "payment_api_egress")).toMatchObject({
+      type: "egress",
+      from_port: 0,
+      to_port: 0,
+      protocol: "-1",
+      cidr_blocks: ["0.0.0.0/0"],
+      security_group_id: "${aws_security_group.payment_api.id}",
+    });
+    // VPC-access managed policy attachment
+    expect(
+      resource(tf, "aws_iam_role_policy_attachment", "payment_api_vpc_access")["policy_arn"],
+    ).toBe("arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole");
+    // VPC data sources present
+    expect(data(tf, "aws_vpc", "selected")["filter"]).toEqual({
+      name: "tag:Name",
+      values: ["dev-venture-core-vpc"],
+    });
+    expect(data(tf, "aws_subnets", "selected")).toBeDefined();
+  });
+
+  test("lambda defaults to the internal zone when zone omitted", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "internal",
+        serviceName: "payment-api",
+        serviceType: "lambda",
+        sourcePath: "infra/services/dev/venture/core/internal/payment-api.lambda.yaml",
+      },
+      config: {
+        runtime: "nodejs22.x",
+        handler: "index.handler",
+        package: "../x.zip",
+        memoryMb: 128,
+        timeoutSeconds: 10,
+        logRetentionDays: 7,
+        environment: {},
+        permissions: { dynamodb: [] },
+      },
+    };
+    const tf = terraformResult(terraformForService(service, { target: "aws" }));
+    // internal zone → subnets present via default
+    expect(
+      objectProperty(resource(tf, "aws_lambda_function", "payment_api"), "vpc_config")[
+        "subnet_ids"
+      ],
+    ).toBe("${data.aws_subnets.selected.ids}");
+  });
+
+  test("ecs permissions.lambda grants InvokeFunction on the target + injects function name env", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "payments-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/payments-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "fargate" },
+        service: { desiredCount: 1, containerPort: 3002 },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "nebula-payments", tag: "local" },
+        healthCheck: { path: "/payments" },
+        permissions: { lambda: [{ service: "payment-api", actions: ["lambda:InvokeFunction"] }] },
+      },
+    };
+    const tf = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: { "payment-api": "dev-venture-core-internal-payment-api" },
+      }),
+    );
+    const taskRole = resource(tf, "aws_iam_role", "payments_app_task_role");
+    expect(taskRole["name"]).toBe("dev-venture-core-public-payments-app-task-role");
+    const policy = resource(tf, "aws_iam_role_policy", "payments_app_lambda_invoke");
+    const doc = JSON.parse(stringProperty(policy, "policy"));
+    expect(doc.Statement[0].Action).toEqual(["lambda:InvokeFunction"]);
+    expect(doc.Statement[0].Resource).toBe(
+      "arn:aws:lambda:ap-southeast-2:*:function:dev-venture-core-internal-payment-api",
+    );
+    const taskDef = resource(tf, "aws_ecs_task_definition", "payments_app");
+    expect(taskDef["task_role_arn"]).toBe("${aws_iam_role.payments_app_task_role.arn}");
+    const container = JSON.parse(stringProperty(taskDef, "container_definitions"))[0];
+    expect(container.environment).toContainEqual({
+      name: "PAYMENT_API_FUNCTION_NAME",
+      value: "dev-venture-core-internal-payment-api",
+    });
+  });
+
+  test("ecs permissions.lambda injects Floci AWS endpoint + creds so the task SDK reaches Floci", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "payments-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/payments-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "fargate" },
+        service: { desiredCount: 1, containerPort: 3002 },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "nebula-payments", tag: "local" },
+        healthCheck: { path: "/payments" },
+        permissions: { lambda: [{ service: "payment-api", actions: ["lambda:InvokeFunction"] }] },
+      },
+    };
+    const tf = terraformResult(
+      terraformForService(service, {
+        target: "floci",
+        serviceNames: { "payment-api": "dev-venture-core-internal-payment-api" },
+      }),
+    );
+    const taskDef = resource(tf, "aws_ecs_task_definition", "payments_app");
+    const container = JSON.parse(stringProperty(taskDef, "container_definitions"))[0];
+    expect(container.environment).toContainEqual({
+      name: "PAYMENT_API_FUNCTION_NAME",
+      value: "dev-venture-core-internal-payment-api",
+    });
+    expect(container.environment).toContainEqual({
+      name: "AWS_ENDPOINT_URL",
+      value: "http://host.docker.internal:4566",
+    });
+    expect(container.environment).toContainEqual({ name: "AWS_ACCESS_KEY_ID", value: "test" });
+    expect(container.environment).toContainEqual({ name: "AWS_SECRET_ACCESS_KEY", value: "test" });
+  });
+
+  test("ecs permissions.lambda on aws does NOT inject Floci creds", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "payments-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/payments-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "fargate" },
+        service: { desiredCount: 1, containerPort: 3002 },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "nebula-payments", tag: "local" },
+        healthCheck: { path: "/payments" },
+        permissions: { lambda: [{ service: "payment-api", actions: ["lambda:InvokeFunction"] }] },
+      },
+    };
+    const tf = terraformResult(
+      terraformForService(service, {
+        target: "aws",
+        serviceNames: { "payment-api": "dev-venture-core-internal-payment-api" },
+      }),
+    );
+    const taskDef = resource(tf, "aws_ecs_task_definition", "payments_app");
+    const container = JSON.parse(stringProperty(taskDef, "container_definitions"))[0];
+    expect(container.environment).not.toContainEqual({ name: "AWS_ACCESS_KEY_ID", value: "test" });
+    expect(container.environment).not.toContainEqual({
+      name: "AWS_ENDPOINT_URL",
+      value: "http://host.docker.internal:4566",
+    });
+  });
+
+  test("ecs without permissions.lambda emits no task role (byte-identical path)", () => {
+    const service: LoadedService = {
+      metadata: {
+        env: "dev",
+        venture: "venture",
+        vpc: "core",
+        securityZone: "public",
+        serviceName: "docs-app",
+        serviceType: "ecs",
+        sourcePath: "infra/services/dev/venture/core/public/docs-app.ecs.yaml",
+      },
+      config: {
+        cluster: { capacity: "fargate" },
+        service: { desiredCount: 1, containerPort: 3001 },
+        task: { cpu: 256, memoryMb: 512 },
+        image: { repository: "nebula-docs", tag: "local" },
+        healthCheck: { path: "/docs" },
+      },
+    };
+    const tf = terraformResult(terraformForService(service, { target: "aws" }));
+    expect(objectProperty(tf.resource, "aws_iam_role")["docs_app_task_role"]).toBeUndefined();
+    expect(resource(tf, "aws_ecs_task_definition", "docs_app")["task_role_arn"]).toBeUndefined();
+  });
+
   test("injects local AWS endpoint URL for Floci Lambda deployments", () => {
     const service: LoadedService = {
       metadata: {

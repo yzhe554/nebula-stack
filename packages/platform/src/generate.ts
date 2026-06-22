@@ -7,6 +7,7 @@ import {
   serviceContainerPortsFromManifest,
   serviceNamesFromManifest,
 } from "./registry";
+import { deriveRequiredAwsEndpoints } from "./services/network/endpoints";
 import { terraformForService, type DeployTarget } from "./terraform";
 import { validateServiceReferences } from "./validate";
 
@@ -33,6 +34,7 @@ validateServiceReferences(scopedServices);
 const manifest = buildServiceManifest(scopedServices);
 const serviceNames = serviceNamesFromManifest(manifest);
 const serviceContainerPorts = serviceContainerPortsFromManifest(manifest);
+const requiredAwsEndpoints = deriveRequiredAwsEndpoints(scopedServices);
 const target = args.target ?? "aws";
 
 for (const service of services) {
@@ -40,7 +42,7 @@ for (const service of services) {
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(
     path.join(outputDirectory, "main.tf.json"),
-    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames, serviceContainerPorts }), null, 2)}\n`,
+    `${JSON.stringify(terraformForService(service, { target, moduleDirectory: outputDirectory, serviceNames, serviceContainerPorts, requiredAwsEndpoints }), null, 2)}\n`,
     "utf8",
   );
   console.log(

@@ -1,4 +1,10 @@
-import { baseTerraform, regionForTarget, tagsFor, type TerraformJson } from "../../terraform/base";
+import {
+  baseTerraform,
+  flociEcsEndpointUrl,
+  regionForTarget,
+  tagsFor,
+  type TerraformJson,
+} from "../../terraform/base";
 import {
   ecsLoadBalancerName,
   physicalName,
@@ -9,13 +15,60 @@ import { vpcDataSources } from "../../terraform/vpc-lookup";
 import type { TerraformContext } from "../../terraform/context";
 import type { LoadedService } from "../../types";
 
+function serviceNameFor(serviceName: string, options: TerraformContext, message: string): string {
+  const configuredName = options.serviceNames?.[serviceName];
+  if (configuredName) {
+    return configuredName;
+  }
+  throw new Error(`${message} ${serviceName}`);
+}
+
+function functionNameEnvKey(serviceName: string): string {
+  return `${serviceName.toUpperCase().replace(/-/g, "_")}_FUNCTION_NAME`;
+}
+
+// Container environment for an ECS task: the target Lambda function names (so the
+// app's SDK knows what to invoke) plus, on the Floci target, the local AWS
+// endpoint + test credentials so the in-container AWS SDK reaches Floci (mirrors
+// the lambda emitter's AWS_ENDPOINT_URL injection). Returns undefined when there
+// is nothing to inject, so services without lambda permissions stay byte-identical.
+function containerEnvironmentFor(
+  service: EcsService,
+  options: TerraformContext,
+): Array<{ name: string; value: string }> | undefined {
+  const lambdaPermissions = service.config.permissions?.lambda ?? [];
+  if (lambdaPermissions.length === 0) {
+    return undefined;
+  }
+
+  const env = lambdaPermissions.map((permission) => ({
+    name: functionNameEnvKey(permission.service),
+    value: serviceNameFor(
+      permission.service,
+      options,
+      "permissions.lambda references unknown Lambda service",
+    ),
+  }));
+
+  if (options.target === "floci") {
+    env.push(
+      { name: "AWS_ENDPOINT_URL", value: flociEcsEndpointUrl },
+      { name: "AWS_REGION", value: regionForTarget("floci") },
+      { name: "AWS_ACCESS_KEY_ID", value: "test" },
+      { name: "AWS_SECRET_ACCESS_KEY", value: "test" },
+    );
+  }
+
+  return env;
+}
+
 export type EcsService = Extract<LoadedService, { metadata: { serviceType: "ecs" } }>;
 
 export function terraformForEcs(service: EcsService, options: TerraformContext): TerraformJson {
   const resourceName = terraformName(service.metadata.serviceName);
 
   if (options.target === "floci") {
-    return flociEcsResources(service, resourceName);
+    return flociEcsResources(service, resourceName, options);
   }
 
   if (service.config.cluster.capacity === "fargate") {
@@ -34,8 +87,32 @@ function awsEc2EcsResources(
   const loadBalancerName = ecsLoadBalancerName(service.metadata);
   const roleName = `${resourceName}_task_execution_role`;
   const instanceRoleName = `${resourceName}_instance_role`;
+  const taskRoleName = `${resourceName}_task_role`;
   const desiredCapacity = service.config.cluster.desiredCapacity ?? 1;
   const instanceType = service.config.cluster.instanceType ?? "t3.micro";
+  const lambdaPermissions = service.config.permissions?.lambda;
+  const hasLambdaPermissions = lambdaPermissions !== undefined && lambdaPermissions.length > 0;
+
+  const containerEnvironment = containerEnvironmentFor(service, options);
+
+  const taskRoleResources = hasLambdaPermissions
+    ? {
+        aws_iam_role_policy: {
+          [`${resourceName}_lambda_invoke`]: {
+            name: physicalName(service.metadata, "lambda-invoke"),
+            role: `\${aws_iam_role.${taskRoleName}.id}`,
+            policy: JSON.stringify({
+              Version: "2012-10-17",
+              Statement: lambdaPermissions.map((p) => ({
+                Effect: "Allow",
+                Action: p.actions,
+                Resource: `arn:aws:lambda:${regionForTarget(options.target ?? "aws")}:*:function:${serviceNameFor(p.service, options, "permissions.lambda references unknown Lambda service")}`,
+              })),
+            }),
+          },
+        },
+      }
+    : {};
 
   return baseTerraform(
     service.metadata,
@@ -76,6 +153,24 @@ function awsEc2EcsResources(
           }),
           tags: tagsFor(service.metadata),
         },
+        ...(hasLambdaPermissions
+          ? {
+              [taskRoleName]: {
+                name: physicalName(service.metadata, "task-role"),
+                assume_role_policy: JSON.stringify({
+                  Version: "2012-10-17",
+                  Statement: [
+                    {
+                      Action: "sts:AssumeRole",
+                      Effect: "Allow",
+                      Principal: { Service: "ecs-tasks.amazonaws.com" },
+                    },
+                  ],
+                }),
+                tags: tagsFor(service.metadata),
+              },
+            }
+          : {}),
       },
       aws_iam_role_policy_attachment: {
         [`${roleName}_execution`]: {
@@ -87,6 +182,7 @@ function awsEc2EcsResources(
           policy_arn: "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role",
         },
       },
+      ...taskRoleResources,
       aws_iam_instance_profile: {
         [resourceName]: {
           name: physicalName(service.metadata, "instance-profile"),
@@ -108,6 +204,9 @@ function awsEc2EcsResources(
           cpu: String(service.config.task.cpu),
           memory: String(service.config.task.memoryMb),
           execution_role_arn: `\${aws_iam_role.${roleName}.arn}`,
+          ...(hasLambdaPermissions
+            ? { task_role_arn: `\${aws_iam_role.${taskRoleName}.arn}` }
+            : {}),
           container_definitions: JSON.stringify([
             {
               name: resourceName,
@@ -128,6 +227,7 @@ function awsEc2EcsResources(
                   "awslogs-stream-prefix": resourceName,
                 },
               },
+              ...(containerEnvironment !== undefined ? { environment: containerEnvironment } : {}),
             },
           ]),
         },
@@ -292,9 +392,53 @@ function awsEc2EcsResources(
   );
 }
 
-function flociEcsResources(service: EcsService, resourceName: string): TerraformJson {
+function flociEcsResources(
+  service: EcsService,
+  resourceName: string,
+  options: TerraformContext,
+): TerraformJson {
   const physicalServiceName = physicalName(service.metadata);
   const loadBalancerName = ecsLoadBalancerName(service.metadata);
+  const taskRoleName = `${resourceName}_task_role`;
+  const lambdaPermissions = service.config.permissions?.lambda;
+  const hasLambdaPermissions = lambdaPermissions !== undefined && lambdaPermissions.length > 0;
+
+  const containerEnvironment = containerEnvironmentFor(service, options);
+
+  const taskRoleResources = hasLambdaPermissions
+    ? {
+        aws_iam_role: {
+          [taskRoleName]: {
+            name: physicalName(service.metadata, "task-role"),
+            assume_role_policy: JSON.stringify({
+              Version: "2012-10-17",
+              Statement: [
+                {
+                  Action: "sts:AssumeRole",
+                  Effect: "Allow",
+                  Principal: { Service: "ecs-tasks.amazonaws.com" },
+                },
+              ],
+            }),
+            tags: tagsFor(service.metadata),
+          },
+        },
+        aws_iam_role_policy: {
+          [`${resourceName}_lambda_invoke`]: {
+            name: physicalName(service.metadata, "lambda-invoke"),
+            role: `\${aws_iam_role.${taskRoleName}.id}`,
+            policy: JSON.stringify({
+              Version: "2012-10-17",
+              Statement: lambdaPermissions.map((p) => ({
+                Effect: "Allow",
+                Action: p.actions,
+                Resource: `arn:aws:lambda:${regionForTarget("floci")}:*:function:${serviceNameFor(p.service, options, "permissions.lambda references unknown Lambda service")}`,
+              })),
+            }),
+          },
+        },
+      }
+    : {};
 
   return baseTerraform(
     service.metadata,
@@ -306,6 +450,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
           tags: tagsFor(service.metadata),
         },
       },
+      ...taskRoleResources,
       aws_ecs_task_definition: {
         [resourceName]: {
           family: physicalServiceName,
@@ -313,6 +458,9 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
           requires_compatibilities: ["EC2"],
           cpu: String(service.config.task.cpu),
           memory: String(service.config.task.memoryMb),
+          ...(hasLambdaPermissions
+            ? { task_role_arn: `\${aws_iam_role.${taskRoleName}.arn}` }
+            : {}),
           container_definitions: JSON.stringify([
             {
               name: resourceName,
@@ -325,6 +473,7 @@ function flociEcsResources(service: EcsService, resourceName: string): Terraform
                   protocol: "tcp",
                 },
               ],
+              ...(containerEnvironment !== undefined ? { environment: containerEnvironment } : {}),
             },
           ]),
         },
@@ -396,6 +545,30 @@ function awsFargateEcsResources(
 ): TerraformJson {
   const physicalServiceName = physicalName(service.metadata);
   const roleName = `${resourceName}_task_execution_role`;
+  const taskRoleName = `${resourceName}_task_role`;
+  const lambdaPermissions = service.config.permissions?.lambda;
+  const hasLambdaPermissions = lambdaPermissions !== undefined && lambdaPermissions.length > 0;
+
+  const containerEnvironment = containerEnvironmentFor(service, options);
+
+  const taskRoleResources = hasLambdaPermissions
+    ? {
+        aws_iam_role_policy: {
+          [`${resourceName}_lambda_invoke`]: {
+            name: physicalName(service.metadata, "lambda-invoke"),
+            role: `\${aws_iam_role.${taskRoleName}.id}`,
+            policy: JSON.stringify({
+              Version: "2012-10-17",
+              Statement: lambdaPermissions.map((p) => ({
+                Effect: "Allow",
+                Action: p.actions,
+                Resource: `arn:aws:lambda:${regionForTarget(options.target ?? "aws")}:*:function:${serviceNameFor(p.service, options, "permissions.lambda references unknown Lambda service")}`,
+              })),
+            }),
+          },
+        },
+      }
+    : {};
 
   return baseTerraform(
     service.metadata,
@@ -422,6 +595,24 @@ function awsFargateEcsResources(
           }),
           tags: tagsFor(service.metadata),
         },
+        ...(hasLambdaPermissions
+          ? {
+              [taskRoleName]: {
+                name: physicalName(service.metadata, "task-role"),
+                assume_role_policy: JSON.stringify({
+                  Version: "2012-10-17",
+                  Statement: [
+                    {
+                      Action: "sts:AssumeRole",
+                      Effect: "Allow",
+                      Principal: { Service: "ecs-tasks.amazonaws.com" },
+                    },
+                  ],
+                }),
+                tags: tagsFor(service.metadata),
+              },
+            }
+          : {}),
       },
       aws_iam_role_policy_attachment: {
         [`${roleName}_execution`]: {
@@ -429,6 +620,7 @@ function awsFargateEcsResources(
           policy_arn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
         },
       },
+      ...taskRoleResources,
       aws_cloudwatch_log_group: {
         [resourceName]: {
           name: `/ecs/${physicalServiceName}`,
@@ -444,6 +636,9 @@ function awsFargateEcsResources(
           cpu: String(service.config.task.cpu),
           memory: String(service.config.task.memoryMb),
           execution_role_arn: `\${aws_iam_role.${roleName}.arn}`,
+          ...(hasLambdaPermissions
+            ? { task_role_arn: `\${aws_iam_role.${taskRoleName}.arn}` }
+            : {}),
           container_definitions: JSON.stringify([
             {
               name: resourceName,
@@ -464,6 +659,7 @@ function awsFargateEcsResources(
                   "awslogs-stream-prefix": resourceName,
                 },
               },
+              ...(containerEnvironment !== undefined ? { environment: containerEnvironment } : {}),
             },
           ]),
         },

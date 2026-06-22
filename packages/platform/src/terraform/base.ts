@@ -5,6 +5,12 @@ export type TerraformJson = Record<string, unknown>;
 export type DeployTarget = "aws" | "floci";
 
 export const flociEndpointUrl = "http://localhost.floci.io:4566";
+
+// Floci endpoint as reachable from inside an ECS task container. ECS containers
+// cannot resolve `localhost.floci.io`; they reach the host-published Floci port
+// via host.docker.internal (the same host alias the API Gateway uses for ECS).
+export const flociEcsEndpointUrl = "http://host.docker.internal:4566";
+
 const awsRegion = "ap-southeast-2";
 const flociRegion = "us-east-1";
 

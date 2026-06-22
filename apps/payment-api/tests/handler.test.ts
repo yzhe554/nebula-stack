@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { PutItemCommand } from "@aws-sdk/client-dynamodb";
 import type { LambdaEvent } from "hono/aws-lambda";
-import { createApp, createLambdaHandler } from "../index";
+import { createApp, createLambdaHandler, invokeDirect } from "../index";
 
 describe("payment-api app", () => {
   test("writes one payment message to DynamoDB", async () => {
@@ -77,6 +77,29 @@ describe("payment-api app", () => {
       },
     ]);
   });
+});
+
+test("invokeDirect writes a raw payload to DynamoDB and returns stored", async () => {
+  const sent: unknown[] = [];
+  const result = await invokeDirect(
+    { customerId: "c-direct", message: "raw-invoke" },
+    {
+      tableName: "payments-table",
+      dynamoDbClient: {
+        send: async (command: PutItemCommand) => {
+          sent.push(command.input);
+          return {};
+        },
+      },
+    },
+  );
+  expect(result).toEqual({ customerId: "c-direct", stored: true });
+  expect(sent).toEqual([
+    {
+      TableName: "payments-table",
+      Item: { customerId: { S: "c-direct" }, message: { S: "raw-invoke" } },
+    },
+  ]);
 });
 
 function paymentApiGatewayEvent(customerId: string, message: string): LambdaEvent {

@@ -168,6 +168,43 @@
         "path"
       ],
       "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "lambda": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "service": {
+                "type": "string",
+                "minLength": 1
+              },
+              "actions": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "lambda:InvokeFunction"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "service",
+              "actions"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "lambda"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

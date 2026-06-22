@@ -3,22 +3,15 @@ set -euo pipefail
 
 DOCS_API_NAME="dev-venture-core-public-docs"
 PAYMENTS_API_NAME="dev-venture-core-public-payments"
-PAYMENT_API_NAME="dev-venture-core-internal-payment-api-ingress"
 ENDPOINT_URL="http://localhost:4566"
 DOCS_STATE_DIR="infra/services/dev/venture/core/public/__generated__/floci/docs"
 DOCS_APP_STATE_DIR="infra/services/dev/venture/core/public/__generated__/floci/docs-app"
 PAYMENTS_STATE_DIR="infra/services/dev/venture/core/public/__generated__/floci/payments"
 PAYMENTS_APP_STATE_DIR="infra/services/dev/venture/core/public/__generated__/floci/payments-app"
-PAYMENT_API_STATE_DIR="infra/services/dev/venture/core/internal/__generated__/floci/payment-api-ingress"
 
 docs_api_id="$(AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
   aws --endpoint-url="$ENDPOINT_URL" apigatewayv2 get-apis \
   --query "Items[?Name=='$DOCS_API_NAME'].ApiId | [0]" \
-  --output text 2>/dev/null || true)"
-
-payment_api_id="$(AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
-  aws --endpoint-url="$ENDPOINT_URL" apigatewayv2 get-apis \
-  --query "Items[?Name=='$PAYMENT_API_NAME'].ApiId | [0]" \
   --output text 2>/dev/null || true)"
 
 payments_api_id="$(AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
@@ -29,12 +22,6 @@ payments_api_id="$(AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT
 if [[ -z "$docs_api_id" || "$docs_api_id" == "None" ]]; then
   if [[ -d "$DOCS_STATE_DIR" ]]; then
     docs_api_id="$(jq -r '.resources[] | select(.type == "aws_apigatewayv2_api" and .name == "docs") | .instances[0].attributes.id // empty' "$DOCS_STATE_DIR/terraform.tfstate" 2>/dev/null || true)"
-  fi
-fi
-
-if [[ -z "$payment_api_id" || "$payment_api_id" == "None" ]]; then
-  if [[ -d "$PAYMENT_API_STATE_DIR" ]]; then
-    payment_api_id="$(jq -r '.resources[] | select(.type == "aws_apigatewayv2_api" and .name == "payment_api_ingress") | .instances[0].attributes.id // empty' "$PAYMENT_API_STATE_DIR/terraform.tfstate" 2>/dev/null || true)"
   fi
 fi
 
@@ -127,21 +114,12 @@ http://dev-venture-core-public-payments-app.floci.localhost:3002/payments
 
 URLS
 
-if [[ -n "$payment_api_id" && "$payment_api_id" != "None" ]]; then
-  payment_gateway_path="/execute-api/$payment_api_id/\$default"
-  cat <<URLS
-Payment API via API Gateway:
-$ENDPOINT_URL$payment_gateway_path/api/payments
+cat <<URLS
+Payment API:
+Invoked privately via the AWS SDK from the payments app (no public API Gateway).
+Submit a payment from the payments UI to exercise it.
 
 URLS
-else
-  cat <<URLS
-Payment API via API Gateway:
-Not deployed. Run full stack deploy if needed:
-pnpm floci:deploy:all
-
-URLS
-fi
 
 cat <<URLS
 For local dev proxy mode, start docs with:

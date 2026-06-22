@@ -32,6 +32,7 @@ export const lambdaSchema = z.object({
   timeoutSeconds: z.number().int().min(1).max(900),
   logRetentionDays: z.literal(lambdaLogRetentionDaysValues),
   environment: z.record(z.string(), z.string()),
+  zone: z.string().min(1).default("internal").optional(),
   permissions: z.object({
     dynamodb: z.array(
       z.object({

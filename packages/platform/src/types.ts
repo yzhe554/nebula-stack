@@ -18,6 +18,8 @@ export type LambdaConfig = {
   timeoutSeconds: number;
   logRetentionDays: number;
   environment: Record<string, string>;
+  /** VPC zone the Lambda's ENIs live in. Defaults to "internal" when omitted. */
+  zone?: string;
   permissions: {
     dynamodb: DynamoDbPermission[];
   };
@@ -111,6 +113,9 @@ export type EcsConfig = {
   };
   healthCheck: {
     path: string;
+  };
+  permissions?: {
+    lambda: Array<{ service: string; actions: Array<"lambda:InvokeFunction"> }>;
   };
 };
 

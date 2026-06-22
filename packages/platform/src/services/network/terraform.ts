@@ -1,6 +1,7 @@
-import { baseTerraform, tagsFor, type TerraformJson } from "../../terraform/base";
+import { baseTerraform, regionForTarget, tagsFor, type TerraformJson } from "../../terraform/base";
 import type { TerraformContext } from "../../terraform/context";
 import type { LoadedService } from "../../types";
+import { gatewayEndpointResources, interfaceEndpointResources } from "./endpoints";
 
 export type NetworkService = Extract<LoadedService, { metadata: { serviceType: "network" } }>;
 
@@ -146,6 +147,42 @@ export function terraformForNetwork(
   // network module can apply locally. Real AWS keeps full audit logging.
   const flowLogResources = target === "aws" ? flowLogResourcesFor(m, namePrefix) : {};
 
+  // VPC endpoints (gateway + interface) are derived from services' permissions
+  // and emitted only for the aws target. Floci reaches AWS via AWS_ENDPOINT_URL,
+  // so no real endpoint is needed locally. Interface endpoints contribute an
+  // endpoints security group + ingress rule + a subnet data source, all merged
+  // into the corresponding maps below.
+  const requiredEndpoints = options.requiredAwsEndpoints ?? [];
+  const endpointContext = {
+    region: regionForTarget(target),
+    zone: "internal",
+    namePrefix,
+  };
+  const gatewayEndpoints: Record<string, unknown> =
+    target === "aws" ? gatewayEndpointResources(requiredEndpoints, endpointContext) : {};
+  const interfaceEndpoints: Record<string, unknown> =
+    target === "aws" ? interfaceEndpointResources(requiredEndpoints, endpointContext) : {};
+
+  const vpcEndpoints: Record<string, unknown> = {
+    ...(isRecord(gatewayEndpoints.aws_vpc_endpoint) ? gatewayEndpoints.aws_vpc_endpoint : {}),
+    ...(isRecord(interfaceEndpoints.aws_vpc_endpoint) ? interfaceEndpoints.aws_vpc_endpoint : {}),
+  };
+
+  const mergedSecurityGroups: Record<string, unknown> = {
+    ...securityGroups,
+    ...(isRecord(interfaceEndpoints.aws_security_group)
+      ? interfaceEndpoints.aws_security_group
+      : {}),
+  };
+  const mergedSgRules: Record<string, unknown> = {
+    ...sgRules,
+    ...(isRecord(interfaceEndpoints.aws_security_group_rule)
+      ? interfaceEndpoints.aws_security_group_rule
+      : {}),
+  };
+  const interfaceData = isRecord(interfaceEndpoints.data) ? interfaceEndpoints.data : {};
+  const endpointSubnetData = isRecord(interfaceData.aws_subnets) ? interfaceData.aws_subnets : {};
+
   return baseTerraform(
     m,
     target,
@@ -168,14 +205,20 @@ export function terraformForNetwork(
       aws_route_table: routeTables,
       ...(Object.keys(routes).length > 0 ? { aws_route: routes } : {}),
       aws_route_table_association: routeTableAssociations,
-      aws_security_group: securityGroups,
-      ...(Object.keys(sgRules).length > 0 ? { aws_security_group_rule: sgRules } : {}),
+      aws_security_group: mergedSecurityGroups,
+      ...(Object.keys(mergedSgRules).length > 0 ? { aws_security_group_rule: mergedSgRules } : {}),
+      ...(Object.keys(vpcEndpoints).length > 0 ? { aws_vpc_endpoint: vpcEndpoints } : {}),
       ...flowLogResources,
     },
     {
       aws_availability_zones: { available: { state: "available" } },
+      ...(Object.keys(endpointSubnetData).length > 0 ? { aws_subnets: endpointSubnetData } : {}),
     },
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function flowLogResourcesFor(

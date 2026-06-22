@@ -68,6 +68,11 @@
         "type": "string"
       }
     },
+    "zone": {
+      "default": "internal",
+      "type": "string",
+      "minLength": 1
+    },
     "permissions": {
       "type": "object",
       "properties": {

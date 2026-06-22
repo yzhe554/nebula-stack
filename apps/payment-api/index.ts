@@ -1,6 +1,7 @@
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 import { Hono } from "hono";
 import { handle } from "hono/aws-lambda";
+import type { LambdaContext, LambdaEvent } from "hono/aws-lambda";
 
 type PaymentBody = {
   customerId?: string;
@@ -19,25 +20,33 @@ type AppOptions = {
   dynamoDbClient: DynamoDbSender;
 };
 
+async function storePayment(
+  body: PaymentBody,
+  options: AppOptions,
+): Promise<{ customerId: string; stored: true }> {
+  const customerId = body.customerId ?? body.paymentId ?? `customer-${Date.now()}`;
+  const message = body.message ?? "created";
+  await options.dynamoDbClient.send(
+    new PutItemCommand({
+      TableName: options.tableName,
+      Item: {
+        customerId: { S: customerId },
+        message: { S: message },
+      },
+    }),
+  );
+  return { customerId, stored: true };
+}
+
 export function createApp({ tableName, dynamoDbClient }: AppOptions) {
   const app = new Hono();
 
   app.post("/api/payments", async (context) => {
-    const body = paymentBodyFrom(await context.req.json().catch(() => ({})));
-    const customerId = body.customerId ?? body.paymentId ?? `customer-${Date.now()}`;
-    const message = body.message ?? "created";
-
-    await dynamoDbClient.send(
-      new PutItemCommand({
-        TableName: tableName,
-        Item: {
-          customerId: { S: customerId },
-          message: { S: message },
-        },
-      }),
-    );
-
-    return context.json({ customerId, stored: true });
+    const result = await storePayment(paymentBodyFrom(await context.req.json().catch(() => ({}))), {
+      tableName,
+      dynamoDbClient,
+    });
+    return context.json(result);
   });
 
   return app;
@@ -51,10 +60,22 @@ type LambdaHandler = ReturnType<typeof handle>;
 
 let runtimeHandler: LambdaHandler | undefined;
 
-export function handler(...args: Parameters<LambdaHandler>) {
-  runtimeHandler ??= createLambdaHandler(createRuntimeOptions());
+function isApiGatewayEvent(event: unknown): event is LambdaEvent {
+  return (
+    typeof event === "object" && event !== null && "requestContext" in event && "version" in event
+  );
+}
 
-  return runtimeHandler(...args);
+export async function invokeDirect(payload: unknown, options: AppOptions) {
+  return storePayment(paymentBodyFrom(payload), options);
+}
+
+export function handler(event: unknown, context?: LambdaContext) {
+  if (!isApiGatewayEvent(event)) {
+    return invokeDirect(event, createRuntimeOptions());
+  }
+  runtimeHandler ??= createLambdaHandler(createRuntimeOptions());
+  return runtimeHandler(event, context);
 }
 
 function createRuntimeOptions(): AppOptions {

@@ -15,10 +15,13 @@ FUNCTION_NAME="dev-venture-core-internal-payment-api"
 ROLE_NAME="dev-venture-core-internal-payment-api-lambda-role"
 INLINE_POLICY_NAME="dev-venture-core-internal-payment-api-dynamodb-access"
 BASIC_EXECUTION_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+VPC_ACCESS_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 LOG_GROUP_NAME="/aws/lambda/dev-venture-core-internal-payment-api"
+LAMBDA_SG_NAME="dev-venture-core-internal-payment-api-sg"
+PAYMENTS_TASK_ROLE_NAME="dev-venture-core-public-payments-app-task-role"
+PAYMENTS_TASK_ROLE_INLINE_POLICY="dev-venture-core-public-payments-app-lambda-invoke"
 API_GATEWAY_NAMES=(
   "dev-venture-core-public-docs"
-  "dev-venture-core-internal-payment-api-ingress"
   "dev-venture-core-public-payments"
 )
 ECS_SERVICE_NAME="dev-venture-core-public-docs-app"
@@ -238,9 +241,40 @@ run_or_ignore_not_found \
     --policy-arn "$BASIC_EXECUTION_POLICY_ARN"
 
 run_or_ignore_not_found \
+  "Detaching local Floci Lambda VPC access policy" \
+  aws --endpoint-url="$ENDPOINT_URL" iam detach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn "$VPC_ACCESS_POLICY_ARN"
+
+run_or_ignore_not_found \
   "Deleting local Floci Lambda IAM role: $ROLE_NAME" \
   aws --endpoint-url="$ENDPOINT_URL" iam delete-role \
     --role-name "$ROLE_NAME"
+
+# Spec C: the in-VPC Lambda has a dedicated security group, and the payments
+# ECS task has a task role with an inline lambda-invoke policy. Tear both down.
+echo "Deleting local Floci Lambda security group: $LAMBDA_SG_NAME"
+lambda_sg_id="$(aws --endpoint-url="$ENDPOINT_URL" ec2 describe-security-groups \
+  --filters "Name=group-name,Values=$LAMBDA_SG_NAME" \
+  --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || true)"
+if [[ -n "$lambda_sg_id" && "$lambda_sg_id" != "None" ]]; then
+  run_or_ignore_not_found \
+    "Deleting security group $lambda_sg_id" \
+    aws --endpoint-url="$ENDPOINT_URL" ec2 delete-security-group --group-id "$lambda_sg_id"
+else
+  echo "  Already absent"
+fi
+
+run_or_ignore_not_found \
+  "Deleting local Floci payments task-role inline policy: $PAYMENTS_TASK_ROLE_INLINE_POLICY" \
+  aws --endpoint-url="$ENDPOINT_URL" iam delete-role-policy \
+    --role-name "$PAYMENTS_TASK_ROLE_NAME" \
+    --policy-name "$PAYMENTS_TASK_ROLE_INLINE_POLICY"
+
+run_or_ignore_not_found \
+  "Deleting local Floci payments ECS task role: $PAYMENTS_TASK_ROLE_NAME" \
+  aws --endpoint-url="$ENDPOINT_URL" iam delete-role \
+    --role-name "$PAYMENTS_TASK_ROLE_NAME"
 
 "$(dirname "$0")/floci-ddb-reset.sh"
 

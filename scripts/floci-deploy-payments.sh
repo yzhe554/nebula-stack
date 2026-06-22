@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PAYMENTS_API_NAME="dev-venture-core-public-payments"
-PAYMENT_API_NAME="dev-venture-core-internal-payment-api-ingress"
+PAYMENT_API_FUNCTION_NAME="dev-venture-core-internal-payment-api"
 ENDPOINT_URL="http://localhost:4566"
 
 api_id() {
@@ -13,9 +13,18 @@ api_id() {
     --output text 2>/dev/null || true
 }
 
+lambda_exists() {
+  AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
+    aws --endpoint-url="$ENDPOINT_URL" lambda get-function \
+    --function-name "$PAYMENT_API_FUNCTION_NAME" >/dev/null 2>&1
+}
+
+# payment-api is now invoked directly via the AWS SDK from the payments ECS
+# task (no API Gateway in front). It runs in the VPC, so the network module
+# must be deployed first.
 deploy_payment_api_stack() {
   pnpm app:payment-api:package
-  pnpm platform:deploy -- --env dev --venture venture --target floci --services customer-records,payment-api,payment-api-ingress
+  pnpm platform:deploy -- --env dev --venture venture --target floci --services network,customer-records,payment-api
 }
 
 deploy_payments_gateway() {
@@ -31,16 +40,14 @@ deploy_payments_stack() {
 }
 
 payments_api_id="$(api_id "$PAYMENTS_API_NAME")"
-payment_api_id="$(api_id "$PAYMENT_API_NAME")"
 
-if [[ -z "$payment_api_id" || "$payment_api_id" == "None" ]]; then
-  echo "Payment API Gateway not found. Bootstrapping payment API stack first..."
+if ! lambda_exists; then
+  echo "Payment API Lambda not found. Bootstrapping payment API stack first..."
   deploy_payment_api_stack
-  payment_api_id="$(api_id "$PAYMENT_API_NAME")"
 fi
 
-if [[ -z "$payment_api_id" || "$payment_api_id" == "None" ]]; then
-  echo "Payment API Gateway not found after bootstrap: $PAYMENT_API_NAME" >&2
+if ! lambda_exists; then
+  echo "Payment API Lambda not found after bootstrap: $PAYMENT_API_FUNCTION_NAME" >&2
   exit 1
 fi
 
@@ -60,8 +67,10 @@ if [[ -z "$payments_api_id" || "$payments_api_id" == "None" ]]; then
 fi
 
 echo "Building payments image for Floci API Gateway path: /execute-api/$payments_api_id/\$default"
+# The payments server calls the payment-api Lambda via the AWS SDK using
+# PAYMENT_API_FUNCTION_NAME (injected as an ECS task env by permissions.lambda),
+# so no payment-api URL is baked into the image any more.
 NEXT_PUBLIC_GATEWAY_PATH="/execute-api/$payments_api_id/\$default" \
-NEXT_PUBLIC_PAYMENT_API_BASE_URL="$ENDPOINT_URL/execute-api/$payment_api_id/\$default" \
   pnpm payments:build
 pnpm payments:docker:build
 deploy_payments_stack

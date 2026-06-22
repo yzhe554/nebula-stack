@@ -92,6 +92,19 @@ export const ecsSchema = z
         path: z.string().min(1).startsWith("/"),
       })
       .strict(),
+    permissions: z
+      .object({
+        lambda: z
+          .array(
+            z.object({
+              service: z.string().min(1),
+              actions: z.array(z.enum(["lambda:InvokeFunction"])).min(1),
+            }),
+          )
+          .default([]),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((config, context) => {
